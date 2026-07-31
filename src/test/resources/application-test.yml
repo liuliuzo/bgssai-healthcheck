@@ -1,0 +1,13 @@
+bgssai:
+  healthcheck:
+    # 测试里由用例显式触发巡检，避免后台任务干扰断言
+    scheduled: false
+    ui-refresh-seconds: 0
+    history-size: 10
+    probe:
+      connect-timeout: 1s
+      read-timeout: 2s
+
+logging:
+  level:
+    com.bgssai.healthcheck: DEBUG

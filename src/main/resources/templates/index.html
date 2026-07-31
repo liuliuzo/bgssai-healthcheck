@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>BGSSAI 应用健康巡检</title>
+    <link rel="icon" type="image/svg+xml" th:href="@{/favicon.svg}"/>
+    <link rel="stylesheet" th:href="@{/css/app.css}"/>
+</head>
+<body th:attr="data-refresh-seconds=${dashboard.summary.uiRefreshSeconds}">
+
+<header class="topbar">
+    <div class="topbar__brand">
+        <span class="topbar__logo" aria-hidden="true">◎</span>
+        <div>
+            <h1 class="topbar__title">BGSSAI 应用健康巡检</h1>
+            <p class="topbar__subtitle">周期性调用各应用的健康检查接口，汇总展示运行状态</p>
+        </div>
+    </div>
+    <div class="topbar__actions">
+        <label class="switch">
+            <input type="checkbox" id="auto-refresh" checked/>
+            <span class="switch__track" aria-hidden="true"></span>
+            <span class="switch__text">自动刷新</span>
+        </label>
+        <span class="countdown" id="countdown" aria-live="polite"></span>
+        <button type="button" class="btn btn--primary" id="refresh-now">立刻巡检</button>
+        <button type="button" class="btn btn--icon" id="theme-toggle" title="切换深浅色主题"
+                aria-label="切换深浅色主题">◑</button>
+    </div>
+</header>
+
+<main class="layout">
+
+    <section class="toolbar">
+        <label class="search">
+            <span class="search__icon" aria-hidden="true">⌕</span>
+            <input type="search" id="search" placeholder="搜索应用名称、分组、地址或标签…" autocomplete="off"/>
+        </label>
+        <div class="filters" id="state-filters" role="group" aria-label="按状态筛选">
+            <button type="button" class="chip is-active" data-state="all">全部</button>
+            <button type="button" class="chip" data-state="up">正常</button>
+            <button type="button" class="chip" data-state="degraded">降级</button>
+            <button type="button" class="chip" data-state="down">异常</button>
+            <button type="button" class="chip" data-state="unknown">未知</button>
+        </div>
+    </section>
+
+    <div id="dashboard" th:fragment="dashboard" th:with="s=${dashboard.summary}">
+
+        <section class="summary" aria-label="汇总">
+            <article class="stat stat--overall" th:classappend="'is-' + ${s.overall.code}">
+                <span class="stat__label">整体状态</span>
+                <span class="stat__value" th:text="${s.overall.label}">未知</span>
+                <span class="stat__hint" th:text="'最近巡检 ' + ${fmt.ago(s.lastCheckedAt)}">最近巡检 从未</span>
+            </article>
+            <article class="stat">
+                <span class="stat__label">应用总数</span>
+                <span class="stat__value" th:text="${s.total}">0</span>
+                <span class="stat__hint" th:text="${s.disabled} + ' 个已停用'">0 个已停用</span>
+            </article>
+            <article class="stat is-up">
+                <span class="stat__label">正常</span>
+                <span class="stat__value" th:text="${s.up}">0</span>
+            </article>
+            <article class="stat is-degraded">
+                <span class="stat__label">降级</span>
+                <span class="stat__value" th:text="${s.degraded}">0</span>
+            </article>
+            <article class="stat is-down">
+                <span class="stat__label">异常</span>
+                <span class="stat__value" th:text="${s.down}">0</span>
+            </article>
+            <article class="stat is-unknown">
+                <span class="stat__label">未知</span>
+                <span class="stat__value" th:text="${s.unknown}">0</span>
+            </article>
+        </section>
+
+        <p class="empty" th:if="${dashboard.groups.isEmpty()}">
+            还没有配置被监控的应用。请在 <code>application.yml</code> 的
+            <code>bgssai.healthcheck.applications</code> 下添加应用及其健康检查地址。
+        </p>
+
+        <section class="group" th:each="group : ${dashboard.groups}">
+            <header class="group__header">
+                <h2 class="group__title" th:text="${group.name}">分组</h2>
+                <span class="pill" th:classappend="'is-' + ${group.state.code}"
+                      th:text="${group.state.label}">未知</span>
+                <span class="group__meta" th:text="${group.up} + ' / ' + ${group.total} + ' 正常'">0 / 0 正常</span>
+            </header>
+
+            <div class="cards">
+                <article class="card" th:each="app : ${group.apps}"
+                         th:classappend="'is-' + ${app.state.code} + (${app.enabled} ? '' : ' is-disabled')"
+                         th:attr="data-state=${app.state.code},data-search=${fmt.searchKey(app)}">
+
+                    <header class="card__head">
+                        <span class="dot" th:classappend="'is-' + ${app.state.code}" aria-hidden="true"></span>
+                        <h3 class="card__title" th:text="${app.name}">应用名称</h3>
+                        <span class="badge" th:if="${app.critical}" title="关键应用异常会影响平台自身的健康状态">关键</span>
+                        <span class="badge badge--muted" th:if="${!app.enabled}">已停用</span>
+                        <span class="pill" th:classappend="'is-' + ${app.state.code}"
+                              th:text="${app.state.label}">未知</span>
+                    </header>
+
+                    <a class="card__url" th:href="${app.url}" th:text="${app.url}" target="_blank"
+                       rel="noopener noreferrer">健康检查地址</a>
+
+                    <p class="card__desc" th:if="${app.description}" th:text="${app.description}">说明</p>
+
+                    <dl class="metrics">
+                        <div class="metric">
+                            <dt>响应耗时</dt>
+                            <dd th:text="${fmt.latency(app.latencyMs)}">—</dd>
+                        </div>
+                        <div class="metric">
+                            <dt>HTTP</dt>
+                            <dd th:text="${app.httpStatus} ?: '—'">—</dd>
+                        </div>
+                        <div class="metric">
+                            <dt>可用率</dt>
+                            <dd th:text="${app.stats.totalChecks} > 0 ? ${fmt.percent(app.stats.uptimePercent)} : '—'">—</dd>
+                        </div>
+                        <div class="metric">
+                            <dt>最近检查</dt>
+                            <dd th:text="${fmt.ago(app.checkedAt)}" th:title="${fmt.dateTime(app.checkedAt)}">从未</dd>
+                        </div>
+                    </dl>
+
+                    <div class="spark" th:if="${!app.history.isEmpty()}"
+                         th:title="'最近 ' + ${app.history.size()} + ' 次巡检'">
+                        <span class="spark__bar" th:each="sample : ${app.history}"
+                              th:classappend="'is-' + ${sample.state.code}"
+                              th:title="${fmt.dateTime(sample.at)} + ' · ' + ${sample.state.label} + ' · ' + ${fmt.latency(sample.latencyMs)}"></span>
+                    </div>
+
+                    <p class="card__message" th:if="${app.message}" th:text="${app.message}">异常说明</p>
+
+                    <details class="components" th:if="${!app.components.isEmpty()}">
+                        <summary th:text="'子组件 ' + ${app.components.size()} + ' 项'">子组件</summary>
+                        <ul class="components__list">
+                            <li th:each="component : ${app.components}">
+                                <span class="dot dot--sm" th:classappend="'is-' + ${component.state.code}"
+                                      aria-hidden="true"></span>
+                                <span class="components__name" th:text="${component.name}">组件</span>
+                                <span class="components__state" th:text="${component.state.label}">正常</span>
+                            </li>
+                        </ul>
+                    </details>
+
+                    <footer class="card__foot">
+                        <div class="tags">
+                            <span class="tag" th:each="tag : ${app.tags}" th:text="${tag}">标签</span>
+                        </div>
+                        <div class="card__foot-right">
+                            <span class="card__stats"
+                                  th:if="${app.stats.consecutiveFailures} > 0"
+                                  th:text="'连续失败 ' + ${app.stats.consecutiveFailures} + ' 次'">连续失败</span>
+                            <button type="button" class="btn btn--ghost" th:if="${app.enabled}"
+                                    th:attr="data-app-id=${app.id}">重新检查</button>
+                        </div>
+                    </footer>
+                </article>
+            </div>
+        </section>
+
+        <p class="no-match" id="no-match" hidden>没有符合筛选条件的应用。</p>
+    </div>
+
+</main>
+
+<footer class="pagefoot">
+    <span>BGSSAI 应用健康巡检 · Spring Boot 4.1 / Java 21</span>
+    <span>接口：<code>/api/apps</code> · <code>/api/summary</code> · <code>/api/dashboard</code></span>
+</footer>
+
+<script th:src="@{/js/app.js}"></script>
+</body>
+</html>

@@ -26,6 +26,18 @@ final class StubHealthServer implements AutoCloseable {
     private static final String ACTUATOR_OUT_OF_SERVICE = """
             {"status":"OUT_OF_SERVICE"}""";
 
+    /** BGSSAI 产品线形态一：健康负载包在 {code, message, success, result} 封装里（Standards §13.3）。 */
+    private static final String WRAPPED_RESULT_DOWN = """
+            {"code":"0","message":null,"success":true,\
+            "result":{"status":"DOWN","app":"bgssai-vpn-user","checked_at":"2026-07-31 10:24:05",\
+            "components":[{"name":"db","status":"DOWN"},{"name":"mybatis","status":"DOWN"}]}}""";
+
+    /** BGSSAI 产品线形态二：健康负载包在 {code, message, data} 封装里，且整体只是降级（HTTP 仍 200）。 */
+    private static final String WRAPPED_DATA_DEGRADED = """
+            {"code":0,"message":"OK",\
+            "data":{"status":"DEGRADED","app":"bgssai-blog-user","checked_at":"2026-07-31 10:24:05",\
+            "components":[{"name":"disk_space","status":"DEGRADED"},{"name":"db","status":"UP"}]}}""";
+
     private final HttpServer server;
 
     StubHealthServer() {
@@ -43,6 +55,10 @@ final class StubHealthServer implements AutoCloseable {
         this.server.createContext("/down", respond(503, "application/json", ACTUATOR_DOWN));
         // 200 + status=OUT_OF_SERVICE，应被判定为降级
         this.server.createContext("/degraded", respond(200, "application/json", ACTUATOR_OUT_OF_SERVICE));
+        // 封装在 result 里的健康负载：503 + result.status=DOWN
+        this.server.createContext("/wrapped-result", respond(503, "application/json", WRAPPED_RESULT_DOWN));
+        // 封装在 data 里的健康负载：200 + data.status=DEGRADED
+        this.server.createContext("/wrapped-data", respond(200, "application/json", WRAPPED_DATA_DEGRADED));
         // 没有 JSON 报文，只能按状态码判断
         this.server.createContext("/plain", respond(200, "text/plain", "OK"));
         // 用 204 表示健康的接口

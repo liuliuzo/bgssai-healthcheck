@@ -66,6 +66,10 @@ class HealthCheckApplicationTests {
 
         target(registry, 8, "204 表示健康", "其它", STUB.url("/no-content"));
         registry.add("bgssai.healthcheck.applications[8].expected-statuses[0]", () -> "204");
+
+        // BGSSAI 产品线的应用把健康负载包在各仓统一响应封装里（Standards §13.3），封装字段名各仓不同
+        target(registry, 9, "封装在 result 里", "BGSSAI 产品线", STUB.url("/wrapped-result"));
+        target(registry, 10, "封装在 data 里", "BGSSAI 产品线", STUB.url("/wrapped-data"));
     }
 
     private static void target(DynamicPropertyRegistry registry, int index, String name, String group, String url) {
@@ -90,7 +94,7 @@ class HealthCheckApplicationTests {
     @DisplayName("按响应体和状态码归一化出正确的健康状态")
     void normalizesEveryProbeOutcome() {
         List<AppHealth> all = this.healthCheckService.findAll();
-        assertThat(all).hasSize(9);
+        assertThat(all).hasSize(11);
 
         AppHealth up = byName(all, "正常服务");
         assertThat(up.state()).isEqualTo(HealthState.UP);
@@ -106,6 +110,20 @@ class HealthCheckApplicationTests {
         assertThat(down.httpStatus()).isEqualTo(503);
         assertThat(down.components()).singleElement()
                 .satisfies(component -> assertThat(component.state()).isEqualTo(HealthState.DOWN));
+
+        // 封装在 result 里：剥掉 {code,message,success,result} 后取到 DOWN，components 为数组形态
+        AppHealth wrappedResult = byName(all, "封装在 result 里");
+        assertThat(wrappedResult.state()).isEqualTo(HealthState.DOWN);
+        assertThat(wrappedResult.httpStatus()).isEqualTo(503);
+        assertThat(wrappedResult.components()).extracting(component -> component.name())
+                .containsExactlyInAnyOrder("db", "mybatis");
+
+        // 封装在 data 里：DEGRADED 留在 HTTP 200，不该被当成「自报 UP 但状态码异常」那一支
+        AppHealth wrappedData = byName(all, "封装在 data 里");
+        assertThat(wrappedData.state()).isEqualTo(HealthState.DEGRADED);
+        assertThat(wrappedData.httpStatus()).isEqualTo(200);
+        assertThat(wrappedData.components()).extracting(component -> component.name())
+                .containsExactlyInAnyOrder("db", "disk_space");
 
         // 没有 JSON 报文时按状态码判断
         assertThat(byName(all, "非 JSON 服务").state()).isEqualTo(HealthState.UP);
@@ -160,11 +178,11 @@ class HealthCheckApplicationTests {
 
         assertThat(summary).isNotNull();
         assertThat(summary.overall()).isEqualTo(HealthState.DOWN);
-        assertThat(summary.total()).isEqualTo(9);
+        assertThat(summary.total()).isEqualTo(11);
         assertThat(summary.disabled()).isEqualTo(1);
         assertThat(summary.up()).isEqualTo(3);
-        assertThat(summary.degraded()).isEqualTo(1);
-        assertThat(summary.down()).isEqualTo(4);
+        assertThat(summary.degraded()).isEqualTo(2);
+        assertThat(summary.down()).isEqualTo(5);
     }
 
     @Test

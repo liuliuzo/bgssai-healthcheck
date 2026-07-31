@@ -48,6 +48,9 @@ public class HttpHealthProbe {
     /** 依次尝试这些字段来获取对端自报的状态。 */
     private static final List<String> STATUS_KEYS = List.of("status", "state", "health");
 
+    /** 统一响应封装里承载健康负载的字段名，见 {@link #unwrapEnvelope(Map)}。 */
+    private static final List<String> ENVELOPE_PAYLOAD_KEYS = List.of("result", "data");
+
     /** 响应体片段在错误信息里的最大长度。 */
     private static final int MESSAGE_SNIPPET_LIMIT = 200;
 
@@ -178,9 +181,33 @@ public class HttpHealthProbe {
         catch (Exception ex) {
             return ParsedBody.empty();
         }
-        String rawStatus = readStatus(root);
+        Map<?, ?> payload = unwrapEnvelope(root);
+        String rawStatus = readStatus(payload);
         HealthState state = (rawStatus != null) ? HealthState.fromActuator(rawStatus) : null;
-        return new ParsedBody(state, rawStatus, readComponents(root));
+        return new ParsedBody(state, rawStatus, readComponents(payload));
+    }
+
+    /**
+     * 剥掉统一响应封装，拿到真正的健康负载。
+     *
+     * <p>BGSSAI 产品线的应用按 Standards §13 把健康负载放在各仓既有的统一响应封装里，而各仓封装
+     * 字段名并不相同：{@code {code, message, success, result}}、{@code {code, message, data}}、
+     * {@code {success, code, message, data}} 都在用。封装的 {@code code} / {@code success} 表达的是
+     * 「接口调用成功」，与健康无关，因此这里只认负载里的 {@code status}。</p>
+     *
+     * <p>规则：顶层自己就有可识别状态时（Actuator 那种裸响应）原样返回；否则若 {@code result} 或
+     * {@code data} 是一个带状态的对象，就下沉一层。两者都不成立时返回顶层，由调用方回退到 HTTP 状态码。</p>
+     */
+    private static Map<?, ?> unwrapEnvelope(Map<?, ?> root) {
+        if (readStatus(root) != null) {
+            return root;
+        }
+        for (String key : ENVELOPE_PAYLOAD_KEYS) {
+            if (root.get(key) instanceof Map<?, ?> payload && readStatus(payload) != null) {
+                return payload;
+            }
+        }
+        return root;
     }
 
     private static String readStatus(Map<?, ?> node) {
@@ -202,21 +229,39 @@ public class HttpHealthProbe {
 
     private static List<ComponentStatus> readComponents(Map<?, ?> root) {
         Object raw = (root.get("components") != null) ? root.get("components") : root.get("details");
-        if (!(raw instanceof Map<?, ?> components) || components.isEmpty()) {
+        List<ComponentStatus> result = new ArrayList<>();
+        // Actuator 形态：{"components": {"db": {"status": "UP"}}} —— 键即组件名。
+        if (raw instanceof Map<?, ?> components) {
+            components.forEach((name, value) -> {
+                if (!(value instanceof Map<?, ?> component)) {
+                    return;
+                }
+                String status = readStatus(component);
+                if (status == null) {
+                    return;
+                }
+                result.add(new ComponentStatus(String.valueOf(name), HealthState.fromActuator(status),
+                        readComponentDetails(component)));
+            });
+        }
+        // BGSSAI 形态（Standards §13.3）：components 是数组，组件名在元素的 name 字段里。
+        else if (raw instanceof List<?> components) {
+            for (Object value : components) {
+                if (!(value instanceof Map<?, ?> component)) {
+                    continue;
+                }
+                Object name = component.get("name");
+                String status = readStatus(component);
+                if (!(name instanceof String text) || text.isBlank() || status == null) {
+                    continue;
+                }
+                result.add(new ComponentStatus(text, HealthState.fromActuator(status),
+                        readComponentDetails(component)));
+            }
+        }
+        if (result.isEmpty()) {
             return List.of();
         }
-        List<ComponentStatus> result = new ArrayList<>(components.size());
-        components.forEach((name, value) -> {
-            if (!(value instanceof Map<?, ?> component)) {
-                return;
-            }
-            String status = readStatus(component);
-            if (status == null) {
-                return;
-            }
-            result.add(new ComponentStatus(String.valueOf(name), HealthState.fromActuator(status),
-                    readComponentDetails(component)));
-        });
         result.sort((left, right) -> {
             int bySeverity = Integer.compare(right.state().getSeverity(), left.state().getSeverity());
             return (bySeverity != 0) ? bySeverity : left.name().compareToIgnoreCase(right.name());

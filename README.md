@@ -26,49 +26,60 @@ java -jar target/bgssai-healthcheck-0.0.1-SNAPSHOT.jar
 
 ## 配置被监控的应用
 
-全部配置项都在 `application.yml` 的 `bgssai.healthcheck` 下。
+全部配置项都在 `application.properties` 的 `bgssai.healthcheck` 下。**本仓统一用 `.properties`，
+不用 `.yml` / `.yaml`。** 与之配套有三条硬性写法，改配置前务必先看：
 
-```yaml
-bgssai:
-  healthcheck:
-    scheduled: true          # 是否启用后台定时巡检
-    refresh-interval: 30s    # 上一轮结束到下一轮开始的间隔
-    initial-delay: 3s        # 启动后首轮巡检的延迟
-    concurrency: 16          # 单轮巡检的最大并发探测数
-    history-size: 60         # 每个应用保留的历史采样点数量
-    ui-refresh-seconds: 10   # 看板自动刷新间隔，0 表示关闭
+1. **数组 / List 一律带下标 `[n]` 逐项展开**（Standards §4），禁止单行逗号分隔；
+2. **值一律写最终字面量**，禁止 `${...}` 占位符（Standards §1），键、值、注释三处均禁——环境差异走
+   `application-{profile}.properties`；
+3. **非 ASCII 的值必须写成 `\uXXXX` 转义**。Spring Boot 按 `java.util.Properties` 规范以 ISO-8859-1
+   解码 `.properties`（`.yml` 才是一律 UTF-8），直接写中文会被读成乱码——本平台的看板名称与分组名
+   都是配置值，一旦乱码整个看板都不可读。注释里的中文不受影响（注释行不会被解析成值），所以配置
+   文件里每条应用上方都用注释给出了可读的中文名。转换用
+   `python3 -c "import sys;print(sys.argv[1].encode('unicode_escape').decode())" 用户中心`。
+   URL / id / tags / 布尔 / 时长这些 ASCII 值照常直接写。
 
-    probe:
-      connect-timeout: 3s
-      read-timeout: 5s
-      follow-redirects: false  # 健康检查一般不希望跟随跳转
-      max-body-bytes: 65536    # 读取响应体的上限
+```properties
+bgssai.healthcheck.scheduled=true          # 是否启用后台定时巡检
+bgssai.healthcheck.refresh-interval=30s    # 上一轮结束到下一轮开始的间隔
+bgssai.healthcheck.initial-delay=3s        # 启动后首轮巡检的延迟
+bgssai.healthcheck.concurrency=16          # 单轮巡检的最大并发探测数
+bgssai.healthcheck.history-size=60         # 每个应用保留的历史采样点数量
+bgssai.healthcheck.ui-refresh-seconds=10   # 看板自动刷新间隔，0 表示关闭
 
-    applications:
-      - name: 用户中心
-        group: 核心服务
-        url: http://user-center.internal:8080/actuator/health
-        critical: true
-        tags: [ java, 核心链路 ]
+bgssai.healthcheck.probe.connect-timeout=3s
+bgssai.healthcheck.probe.read-timeout=5s
+bgssai.healthcheck.probe.follow-redirects=false  # 健康检查一般不希望跟随跳转
+bgssai.healthcheck.probe.max-body-bytes=65536    # 读取响应体的上限
 
-      - name: 对象存储网关
-        group: 基础设施
-        url: https://oss-gateway.internal/healthz
-        expected-statuses: [ 200, 204 ]   # 该接口用 204 表示健康
-        read-timeout: 10s
+# 用户中心 / 核心服务（name 与 group 是中文，故写 \uXXXX）
+bgssai.healthcheck.applications[0].name=\u7528\u6237\u4e2d\u5fc3
+bgssai.healthcheck.applications[0].group=\u6838\u5fc3\u670d\u52a1
+bgssai.healthcheck.applications[0].url=http://user-center.internal:8080/bgssai/health/readiness
+bgssai.healthcheck.applications[0].critical=true
+bgssai.healthcheck.applications[0].tags[0]=java
 
-      - name: 报表服务
-        group: 内部工具
-        url: http://report.internal:9000/actuator/health
-        username: monitor                 # HTTP Basic 认证
-        password: "change-me"
-        headers:
-          X-Tenant: bgssai
+# 对象存储网关：该接口用 204 表示健康，且需要更长读超时
+bgssai.healthcheck.applications[1].name=oss-gateway
+bgssai.healthcheck.applications[1].group=infra
+bgssai.healthcheck.applications[1].url=https://oss-gateway.internal/healthz
+bgssai.healthcheck.applications[1].expected-statuses[0]=200
+bgssai.healthcheck.applications[1].expected-statuses[1]=204
+bgssai.healthcheck.applications[1].read-timeout=10s
 
-      - name: 灰度环境
-        group: 内部工具
-        url: http://gray.internal:8080/actuator/health
-        enabled: false                    # 保留配置但不巡检
+# 报表服务：HTTP Basic 认证 + 自定义请求头
+bgssai.healthcheck.applications[2].name=report-service
+bgssai.healthcheck.applications[2].group=internal-tools
+bgssai.healthcheck.applications[2].url=http://report.internal:9000/bgssai/health/readiness
+bgssai.healthcheck.applications[2].username=monitor
+bgssai.healthcheck.applications[2].password=change-me
+bgssai.healthcheck.applications[2].headers.X-Tenant=bgssai
+
+# 灰度环境：保留配置但不巡检
+bgssai.healthcheck.applications[3].name=gray-env
+bgssai.healthcheck.applications[3].group=internal-tools
+bgssai.healthcheck.applications[3].url=http://gray.internal:8080/bgssai/health/readiness
+bgssai.healthcheck.applications[3].enabled=false
 ```
 
 ### 单个应用支持的字段
@@ -117,8 +128,8 @@ Actuator 的 `{"components": {"db": {...}}}`（键即组件名），以及 BGSSA
 ### 巡检 BGSSAI 产品线应用
 
 9 个产品 × 管理端 / 用户端共 18 个后端，巡检地址统一为 `/bgssai/health/readiness`（Standards §13.7）。
-`application.yml` 里已按这个路径列全 18 条，主机名是占位符——填入本环境真实主机后把该条的 `enabled`
-改为 `true` 即可。
+`application.properties` 里已按这个路径列全 18 条（下标 `[1]`..`[18]`，`[0]` 是平台自身），主机名是
+占位符——填入本环境真实主机后把该条的 `enabled` 改为 `true` 即可。
 
 选就绪探针而不是另外两个端点，是因为三者里只有它既证明进程活着、又证明关键依赖可用，且不可用时返回
 503：存活探针在数据库不通时照样返回 200，用它巡检等于自欺；全量报告 `/bgssai/health` 信息更全但最坏
@@ -217,7 +228,7 @@ src/main/java/com/bgssai/healthcheck/
     └── ViewFormatter.java                   # 页面格式化
 
 src/main/resources/
-├── application.yml
+├── application.properties
 ├── templates/index.html
 └── static/{css/app.css, js/app.js, favicon.svg}
 ```

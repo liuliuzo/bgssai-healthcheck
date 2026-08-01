@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
  */
 class ApplicationRegistryTests {
 
-    private static final Probe PROBE = new Probe(Duration.ofSeconds(3), Duration.ofSeconds(5), false, 65536);
+    private static final Probe PROBE = new Probe(Duration.ofSeconds(3), Duration.ofSeconds(5), false, 65536, false);
 
     @Test
     @DisplayName("未配置 id 时按名称生成，纯中文名回退到序号")
@@ -56,7 +56,7 @@ class ApplicationRegistryTests {
     @DisplayName("配置了用户名时生成 Basic 认证头")
     void buildsBasicAuthHeader() {
         Target target = new Target(null, "a", "g", "http://a.internal/health", "GET", true, false, List.of(), Map.of(),
-                "monitor", "s3cret", null, null, List.of(), null);
+                "monitor", "s3cret", null, null, List.of(), null, null);
 
         ApplicationRegistry registry = registryOf(target);
 
@@ -68,7 +68,7 @@ class ApplicationRegistryTests {
     @DisplayName("停用的应用不出现在待巡检列表中")
     void enabledExcludesDisabled() {
         Target disabled = new Target(null, "b", "g", "http://b.internal/health", "GET", false, false, List.of(),
-                Map.of(), null, null, null, null, List.of(), null);
+                Map.of(), null, null, null, null, List.of(), null, null);
 
         ApplicationRegistry registry = registryOf(target(null, "a", "http://a.internal/health"), disabled);
 
@@ -92,7 +92,7 @@ class ApplicationRegistryTests {
     @DisplayName("只允许 GET / HEAD")
     void rejectsUnsupportedMethod() {
         Target target = new Target(null, "a", "g", "http://a.internal/health", "POST", true, false, List.of(),
-                Map.of(), null, null, null, null, List.of(), null);
+                Map.of(), null, null, null, null, List.of(), null, null);
 
         assertThatExceptionOfType(IllegalStateException.class).isThrownBy(() -> registryOf(target))
                 .withMessageContaining("只允许 GET / HEAD");
@@ -106,6 +106,6 @@ class ApplicationRegistryTests {
 
     private static Target target(String id, String name, String url) {
         return new Target(id, name, "未分组", url, "GET", true, false, List.of(), Map.of(), null, null, null, null,
-                List.of(), null);
+                List.of(), null, null);
     }
 }

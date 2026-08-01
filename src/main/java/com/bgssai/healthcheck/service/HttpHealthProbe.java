@@ -14,15 +14,27 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.json.JsonMapper;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509ExtendedTrustManager;
+
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.Socket;
+import java.net.http.HttpClient;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -63,6 +75,45 @@ public class HttpHealthProbe {
     private final ClientHttpRequestFactoryBuilder<?> requestFactoryBuilder = ClientHttpRequestFactoryBuilder.detect();
 
     private final Map<String, RestClient> clients = new ConcurrentHashMap<>();
+
+    /**
+     * 放开证书链校验的 TrustManager，仅供显式打开 {@code skip-tls-verification} 的目标使用。
+     *
+     * <p>用 {@link X509ExtendedTrustManager} 而不是 {@code X509TrustManager}：只有前者的
+     * 两个带 {@link Socket} / {@link SSLEngine} 的重载会被 JDK 在启用端点识别时调用，
+     * 实现基类版本才能确保主机名校验一并被放开。</p>
+     */
+    private static final X509ExtendedTrustManager TRUST_ALL = new X509ExtendedTrustManager() {
+
+        @Override
+        public void checkClientTrusted(X509Certificate[] chain, String authType) {
+        }
+
+        @Override
+        public void checkClientTrusted(X509Certificate[] chain, String authType, Socket socket) {
+        }
+
+        @Override
+        public void checkClientTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] chain, String authType) {
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] chain, String authType, Socket socket) {
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] chain, String authType, SSLEngine engine) {
+        }
+
+        @Override
+        public X509Certificate[] getAcceptedIssuers() {
+            return new X509Certificate[0];
+        }
+    };
 
     public HttpHealthProbe(RestClient.Builder restClientBuilder, JsonMapper jsonMapper,
             HealthCheckProperties properties) {
@@ -133,18 +184,62 @@ public class HttpHealthProbe {
     }
 
     private RestClient buildClient(MonitoredApplication app) {
-        HttpClientSettings clientSettings = HttpClientSettings.defaults()
-                .withTimeouts(app.connectTimeout(), app.readTimeout())
-                .withRedirects(this.settings.followRedirects() ? HttpRedirects.FOLLOW : HttpRedirects.DONT_FOLLOW);
-
         RestClient.Builder builder = this.restClientBuilder.clone()
-                .requestFactory(this.requestFactoryBuilder.build(clientSettings));
+                .requestFactory(app.skipTlsVerification()
+                        ? insecureRequestFactory(app)
+                        : this.requestFactoryBuilder.build(standardSettings(app)));
 
         app.headers().forEach(builder::defaultHeader);
         if (app.authorization() != null) {
             builder.defaultHeader(HttpHeaders.AUTHORIZATION, app.authorization());
         }
         return builder.build();
+    }
+
+    private HttpClientSettings standardSettings(MonitoredApplication app) {
+        return HttpClientSettings.defaults()
+                .withTimeouts(app.connectTimeout(), app.readTimeout())
+                .withRedirects(this.settings.followRedirects() ? HttpRedirects.FOLLOW : HttpRedirects.DONT_FOLLOW);
+    }
+
+    /**
+     * 为「跳过证书校验」的目标单独装配请求工厂。
+     *
+     * <p>只在该目标显式打开 {@code skip-tls-verification} 时使用，且仅作用于这一个
+     * {@link RestClient} 实例——不碰 JVM 全局的 {@code SSLContext.setDefault}，因此不会影响本平台
+     * 的其它出站请求，更不会影响任何被监控应用。</p>
+     *
+     * <p>两处都要放开才有效：自定义 {@link X509ExtendedTrustManager} 放开证书链校验，
+     * 清空 {@code endpointIdentificationAlgorithm} 放开主机名校验。只做前者时，JDK
+     * {@link HttpClient} 仍会因 SNI 主机名与证书 CN/SAN 不符而握手失败。</p>
+     */
+    private ClientHttpRequestFactory insecureRequestFactory(MonitoredApplication app) {
+        try {
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, new TrustManager[] { TRUST_ALL }, null);
+
+            SSLParameters sslParameters = new SSLParameters();
+            sslParameters.setEndpointIdentificationAlgorithm(null);
+
+            HttpClient httpClient = HttpClient.newBuilder()
+                    .connectTimeout(app.connectTimeout())
+                    .followRedirects(this.settings.followRedirects()
+                            ? HttpClient.Redirect.NORMAL
+                            : HttpClient.Redirect.NEVER)
+                    .sslContext(sslContext)
+                    .sslParameters(sslParameters)
+                    .build();
+
+            JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+            factory.setReadTimeout(app.readTimeout());
+            return factory;
+        }
+        catch (GeneralSecurityException ex) {
+            // 装配失败时退回标准校验：宁可这条目标报证书错误，也不要让整个平台起不来。
+            log.warn("应用 [{}] 配置了跳过证书校验，但 SSLContext 装配失败（{}），本条改用标准校验",
+                    app.id(), ex.getClass().getSimpleName());
+            return this.requestFactoryBuilder.build(standardSettings(app));
+        }
     }
 
     private String readBody(ClientHttpResponse response) {

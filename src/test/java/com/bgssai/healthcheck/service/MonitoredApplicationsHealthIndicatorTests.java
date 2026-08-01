@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class MonitoredApplicationsHealthIndicatorTests {
 
-    private static final Probe PROBE = new Probe(Duration.ofSeconds(1), Duration.ofSeconds(1), false, 4096);
+    private static final Probe PROBE = new Probe(Duration.ofSeconds(1), Duration.ofSeconds(1), false, 4096, false);
 
     private HealthStatusStore store;
 
@@ -86,6 +86,6 @@ class MonitoredApplicationsHealthIndicatorTests {
 
     private static Target target(String id, String name, boolean critical) {
         return new Target(id, name, "测试", "http://127.0.0.1:1/health", "GET", true, critical, List.of(), Map.of(),
-                null, null, null, null, List.of(), null);
+                null, null, null, null, List.of(), null, null);
     }
 }

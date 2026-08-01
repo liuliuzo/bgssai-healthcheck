@@ -128,8 +128,43 @@ Actuator 的 `{"components": {"db": {...}}}`（键即组件名），以及 BGSSA
 ### 巡检 BGSSAI 产品线应用
 
 9 个产品 × 管理端 / 用户端共 18 个后端，巡检地址统一为 `/bgssai/health/readiness`（Standards §13.7）。
-`application.properties` 里已按这个路径列全 18 条（下标 `[1]`..`[18]`，`[0]` 是平台自身），主机名是
-占位符——填入本环境真实主机后把该条的 `enabled` 改为 `true` 即可。
+巡检目标已按真实地址列全并启用，放在两份 profile 文件里（Standards §1：随环境变化的项一律下沉到
+profile）：
+
+| 文件 | 环境 | 条目 |
+|---|---|---|
+| `src/main/resources/application-prod.properties` | 生产（华为云-境内-上海一 + 腾讯云） | `[0]` 平台自身 + `[1]`..`[18]` 共 19 条 |
+| `src/main/resources/application-dev.properties`  | 开发（华为云-境外-墨西哥二 + 腾讯云） | 同上 19 条 |
+
+启动时用 `SPRING_PROFILES_ACTIVE=prod`（或 `dev`）选定。**不指定 profile 时列表为空**，应用照常启动、
+看板显示「还没有配置被监控的应用」。
+
+三个决定 URL 长相的事实，改地址前务必知道：
+
+1. **端口是 443、协议是 HTTPS**。18 个后端在 dev / prod 都是 `server.port=443` + `server.ssl.enabled=true`
+   （各产品仓 profile 实测），`8080` / `8081` 只是本地开发端口。
+2. **用公网 IP**。境内华为云私网是 `172.31.x`、境外是 `192.168.0.x`，属两个不同区域 / VPC，一台机器
+   走不通对面私网；腾讯云 SaaS 更是只有公网 IP。只有公网 IP 这一套能同时覆盖三处。**若本平台就部署在
+   某一侧 VPC 内**，把该侧条目换成私网 IP 更省流量——每条的私网地址都写在它上方的注释里。
+3. **`skip-tls-verification=true`**。证书签给的是业务域名（`www.bgssai-blog.com` 等），而这里按机器 IP
+   直连，TLS 握手会因主机名不匹配失败，健康的应用会被整片误判为 DOWN。见下一节。
+
+### 跳过证书校验：为什么开、以及怎么关掉它
+
+`bgssai.healthcheck.probe.skip-tls-verification`（全局默认，出厂 `false`）与每条目的
+`applications[n].skip-tls-verification`（覆盖全局）控制是否放开证书链与主机名校验。当前两份 profile
+里 18 条产品后端都显式打开了它。
+
+**放开的只是本平台这一个出站客户端**，用一个仅供该目标使用的 `SSLContext`，不碰 JVM 全局默认值，
+不影响本平台的其它请求，更不改任何被监控应用的配置。安全影响也有限：三个健康端点本就是公开的
+（Standards §13.4），响应体只含白名单字段、不含凭据 / 主机 / 连接串 / 堆栈，探针只做 `GET` 且不带
+业务令牌——中间人能看到或篡改的东西，与它自己直接请求那个公开端点等价。
+
+**想收紧的正解是给每台机器配域名、按域名探测**：把 url 换成 `https://admin.bgssai-blog.com/...`
+这类域名后，证书天然匹配，删掉该条的 `skip-tls-verification` 即可。
+
+回归守护在 `TlsVerificationProbeTests`：一个用例证明不放开时确实会因主机名不匹配判 DOWN（说明这个坑
+真实存在），另一个证明放开后能读到对端自报的 UP。
 
 选就绪探针而不是另外两个端点，是因为三者里只有它既证明进程活着、又证明关键依赖可用，且不可用时返回
 503：存活探针在数据库不通时照样返回 200，用它巡检等于自欺；全量报告 `/bgssai/health` 信息更全但最坏
@@ -228,7 +263,9 @@ src/main/java/com/bgssai/healthcheck/
     └── ViewFormatter.java                   # 页面格式化
 
 src/main/resources/
-├── application.properties
+├── application.properties          # 巡检行为阈值（三环境不变量）
+├── application-prod.properties     # 生产 19 个巡检目标
+├── application-dev.properties      # 开发 19 个巡检目标
 ├── templates/index.html
 └── static/{css/app.css, js/app.js, favicon.svg}
 ```

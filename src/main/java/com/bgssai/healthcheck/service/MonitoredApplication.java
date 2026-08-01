@@ -27,7 +27,10 @@ public record MonitoredApplication(
         Duration connectTimeout,
         Duration readTimeout,
         /** 空集合表示「任意 2xx 都算成功」。 */
-        Set<Integer> expectedStatuses) {
+        Set<Integer> expectedStatuses,
+
+        /** 探测 HTTPS 目标时是否跳过证书链与主机名校验（已合并全局默认值与本条覆盖值）。 */
+        boolean skipTlsVerification) {
 
     public MonitoredApplication {
         tags = (tags == null) ? List.of() : List.copyOf(tags);

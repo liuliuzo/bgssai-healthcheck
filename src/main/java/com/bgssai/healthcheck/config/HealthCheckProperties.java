@@ -48,7 +48,22 @@ public record HealthCheckProperties(
             /* 是否跟随 3xx 跳转；健康检查通常不希望跳转到登录页后被判定为正常。 */
             @DefaultValue("false") boolean followRedirects,
             /* 读取响应体的最大字节数，防止对端返回超大内容拖垮巡检。 */
-            @Min(0) @DefaultValue("65536") int maxBodyBytes) {
+            @Min(0) @DefaultValue("65536") int maxBodyBytes,
+
+            /*
+             * 探测 HTTPS 目标时是否跳过证书链与主机名校验的全局默认值。
+             *
+             * 默认 false，即按标准校验。之所以需要这个开关：BGSSAI 各后端在 dev / prod 都以
+             * TLS 监听 443，证书是签给业务域名的（如 www.bgssai-blog.com），而巡检按机器 IP
+             * 直连——TLS 握手会因主机名不匹配失败，健康的应用会被误判为 DOWN。
+             *
+             * 打开它不会削弱被监控方的安全性：三个健康端点本就是公开的，响应体按 Standards §13.4
+             * 只含白名单字段，不含凭据、主机、连接串或堆栈；探针也只做 GET、不带业务令牌，
+             * 因此中间人能看到 / 篡改的信息与它直接自己请求该公开端点等价。
+             *
+             * 若不希望放开，正确的替代做法是给每台机器配域名并按域名探测（见 README）。
+             */
+            @DefaultValue("false") boolean skipTlsVerification) {
     }
 
     /** 一个被监控的应用。 */
@@ -88,6 +103,9 @@ public record HealthCheckProperties(
             @DefaultValue List<Integer> expectedStatuses,
 
             /* 备注，展示在看板上。 */
-            String description) {
+            String description,
+
+            /* 覆盖 probe.skip-tls-verification；留空表示沿用全局默认值。 */
+            Boolean skipTlsVerification) {
     }
 }

@@ -78,7 +78,8 @@ public class ApplicationRegistry {
                     basicAuthHeader(target),
                     firstNonNull(target.connectTimeout(), probe.connectTimeout()),
                     firstNonNull(target.readTimeout(), probe.readTimeout()),
-                    Set.copyOf(target.expectedStatuses())));
+                    Set.copyOf(target.expectedStatuses()),
+                    firstNonNull(target.skipTlsVerification(), probe.skipTlsVerification())));
         }
         return resolved;
     }
@@ -177,6 +178,11 @@ public class ApplicationRegistry {
     }
 
     private static Duration firstNonNull(Duration value, Duration fallback) {
+        return (value != null) ? value : fallback;
+    }
+
+    /** 单条目未显式配置时沿用 probe 的全局默认值。 */
+    private static boolean firstNonNull(Boolean value, boolean fallback) {
         return (value != null) ? value : fallback;
     }
 }

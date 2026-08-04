@@ -108,7 +108,18 @@ ensure_service() {
   command -v systemctl >/dev/null 2>&1 || { log "systemctl not found; cannot auto-provision service"; return 1; }
   local java_bin unit_path desired
   java_bin="$(command -v java || true)"
-  [[ -n "${java_bin}" ]] || java_bin="/usr/bin/java"
+  if [[ -z "${java_bin}" ]]; then
+    for candidate in /usr/bin/java /usr/lib/jvm/java/bin/java /usr/lib/jvm/jre/bin/java; do
+      if [[ -x "${candidate}" ]]; then
+        java_bin="${candidate}"
+        break
+      fi
+    done
+  fi
+  if [[ -z "${java_bin}" || ! -x "${java_bin}" ]]; then
+    log "ERROR: java executable not found on PATH and no usable fallback under /usr/bin/java or /usr/lib/jvm; refusing to write a broken systemd unit (would yield status=203/EXEC)"
+    return 1
+  fi
   unit_path="/etc/systemd/system/${SERVICE_NAME}.service"
   # 重启限流必须写在 [Unit] 段（systemd.unit(5)）。写进 [Service] 会被当作未知键忽略、
   # 只留一条 daemon-reload 警告，限流形同虚设——这正是本项配置容易配错的地方。

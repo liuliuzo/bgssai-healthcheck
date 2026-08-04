@@ -1,0 +1,26 @@
+[Unit]
+# 单实例健康巡检平台参考单元。
+# 说明：deploy/remote-deploy.sh 在服务不存在时会自动创建等价单元，因此本文件可选——
+# 只有想手动加固（专用用户 / JVM 调优）时才安装；安装后 remote-deploy 不再覆盖它。
+# 安装：cp 到 /etc/systemd/system/ 后 systemctl daemon-reload && systemctl enable --now bgssai-healthcheck
+Description=BGSSAI healthcheck platform (bgssai-healthcheck)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/bgssai/bgssai-healthcheck
+# 巡检目标随 application-<profile>.properties 打包在 jar 内。
+ExecStart=/usr/bin/java -Xms256m -Xmx768m \
+  -jar /opt/bgssai/bgssai-healthcheck/app.jar \
+  --spring.profiles.active=prod
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,52 @@
+// bgssai-healthcheck 关停流水线（Jenkins）。
+//
+// 只 systemctl stop 单实例服务，不构建、不推 jar。
+// 凭据与主机清单口径与部署流水线完全一致（bgssai-<env>-ssh / bgssai-<env>-hosts）。
+//
+// **目标环境由 Job 名前缀决定**（内部名 dev-healthcheck-stop / prod-healthcheck-stop，
+// 界面显示名 bgssai-healthcheck stop(dev) / stop(prod)），不提供下拉框。
+//
+// 开发与生产共用同一台境内机；dev 关停按运维约定直接停止同名服务。
+//
+// 触发方式：仅手动，点 Build 即执行。
+
+@Library('bgssai') _
+
+pipeline {
+  agent any
+
+  options {
+    // 关停只需要共享库与凭据，不需要本仓任何文件；跳过检出省掉跨境克隆。
+    skipDefaultCheckout()
+    disableConcurrentBuilds()
+    timestamps()
+    buildDiscarder(logRotator(numToKeepStr: '30'))
+    timeout(time: 15, unit: 'MINUTES')
+  }
+
+  stages {
+    stage('Resolve environment') {
+      steps {
+        script {
+          env.BGSSAI_ENV = bgssaiResolveEnvironment(action: '关停', requireConfirm: false)
+        }
+      }
+    }
+
+    stage('Stop') {
+      steps {
+        bgssaiStopService(product: 'healthcheck', environment: env.BGSSAI_ENV)
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "关停完成: bgssai-healthcheck environment=${env.BGSSAI_ENV}"
+    }
+    failure {
+      echo "关停失败: bgssai-healthcheck environment=${env.BGSSAI_ENV}"
+      echo '服务可能仍在运行。请登录目标主机确认 systemctl status 后人工处理。'
+    }
+  }
+}

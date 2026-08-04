@@ -243,6 +243,11 @@ $ curl -s localhost:8080/api/summary
 测试用 JDK 自带的 `HttpServer` 模拟被监控应用（见 `StubHealthServer`），覆盖 200/503/204、
 非 JSON 响应、404、连接被拒、读超时等场景，不依赖外部网络。
 
+## 部署
+
+Jenkins 主通道：`bgssai-healthcheck deploy(dev|prod)` / `stop(dev|prod)`。单实例、无
+user/admin；目标机 `123.60.68.201`（dev/prod 同机）。细节见 [`deploy/README.md`](deploy/README.md)。
+
 ## 项目结构
 
 ```

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<!--
+    详情弹窗的内容片段。整块由服务端渲染后交给前端塞进 <dialog>，
+    正文一律走 th:text——原始应答里可能有任何字符，用 th:utext 等于把对端的响应
+    当 HTML 注入进本平台的页面。
+-->
+<body>
+<div th:fragment="detail" class="detail">
+
+    <p class="detail__error" th:if="${error}" th:text="${error}">目标不存在</p>
+
+    <div th:if="${app}" th:remove="tag">
+
+        <header class="detail__head">
+            <span class="dot" th:classappend="'is-' + ${app.state.code}" aria-hidden="true"></span>
+            <h2 class="detail__title" th:text="${app.name}">目标名称</h2>
+            <span class="tag tag--type" th:text="${app.type.label}">类型</span>
+            <span class="pill" th:classappend="'is-' + ${app.state.code}" th:text="${app.state.label}">未知</span>
+        </header>
+        <p class="detail__url" th:text="${app.url}">地址</p>
+
+        <section class="detail__section">
+            <h3 class="detail__subtitle">概览</h3>
+            <table class="detail__table">
+                <tbody>
+                <tr><th>分组</th><td th:text="${app.group}">分组</td></tr>
+                <tr><th>类型</th><td th:text="${app.type.label}">类型</td></tr>
+                <tr><th>标签</th>
+                    <td th:text="${app.tags.isEmpty()} ? '—' : ${#strings.listJoin(app.tags, ', ')}">—</td></tr>
+                <tr><th>备注</th><td th:text="${app.description} ?: '—'">—</td></tr>
+                <tr><th>关键目标</th><td th:text="${app.critical} ? '是' : '否'">否</td></tr>
+                <tr><th>已启用</th><td th:text="${app.enabled} ? '是' : '否'">是</td></tr>
+                <tr><th>HTTP 状态码</th><td th:text="${app.httpStatus} ?: '—'">—</td></tr>
+                <tr><th>响应耗时</th><td th:text="${fmt.latency(app.latencyMs)}">—</td></tr>
+                <tr><th>最近检查</th>
+                    <td th:text="${fmt.dateTime(app.checkedAt)} + '（' + ${fmt.ago(app.checkedAt)} + '）'">—</td></tr>
+                <tr th:if="${app.message}"><th>说明</th><td th:text="${app.message}">说明</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="detail__section">
+            <h3 class="detail__subtitle">统计（自平台本次启动以来）</h3>
+            <table class="detail__table">
+                <tbody>
+                <tr><th>累计探测</th><td th:text="${app.stats.totalChecks}">0</td></tr>
+                <tr><th>其中正常</th><td th:text="${app.stats.upChecks}">0</td></tr>
+                <tr><th>可用率</th>
+                    <td th:text="${app.stats.totalChecks} > 0 ? ${fmt.percent(app.stats.uptimePercent)} : '—'">—</td></tr>
+                <tr><th>平均耗时</th><td th:text="${fmt.latency(app.stats.avgLatencyMs)}">—</td></tr>
+                <tr><th>最大耗时</th><td th:text="${fmt.latency(app.stats.maxLatencyMs)}">—</td></tr>
+                <tr><th>连续失败</th><td th:text="${app.stats.consecutiveFailures}">0</td></tr>
+                <tr><th>最近正常</th><td th:text="${fmt.dateTime(app.stats.lastUpAt)}">—</td></tr>
+                <tr><th>最近异常</th><td th:text="${fmt.dateTime(app.stats.lastDownAt)}">—</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="detail__section" th:if="${!app.components.isEmpty()}">
+            <h3 class="detail__subtitle" th:text="'子组件（' + ${app.components.size()} + ' 项）'">子组件</h3>
+            <table class="detail__table detail__table--components">
+                <thead>
+                <tr><th>组件</th><th>状态</th><th>明细</th></tr>
+                </thead>
+                <tbody>
+                <tr th:each="component : ${app.components}">
+                    <td>
+                        <span class="dot dot--sm" th:classappend="'is-' + ${component.state.code}"
+                              aria-hidden="true"></span>
+                        <span th:text="${component.name}">组件</span>
+                    </td>
+                    <td th:text="${component.state.label}">正常</td>
+                    <td>
+                        <span th:if="${component.details.isEmpty()}">—</span>
+                        <span class="detail__kv" th:each="entry : ${component.details}"
+                              th:text="${entry.key} + '=' + ${entry.value}">k=v</span>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="detail__section" th:if="${app.hasDetail()}" th:with="raw=${app.detail}">
+            <h3 class="detail__subtitle">最近一次原始应答</h3>
+            <table class="detail__table">
+                <tbody>
+                <tr><th>协议</th><td th:text="${raw.protocol}">HTTP</td></tr>
+                <tr><th>请求</th><td><pre class="detail__pre" th:text="${raw.request}">GET ...</pre></td></tr>
+                <tr th:if="${raw.statusLine}"><th>应答首行</th><td th:text="${raw.statusLine}">200 OK</td></tr>
+                <tr><th>正文体量</th><td th:text="${fmt.bytes(raw.bodyBytes)}">—</td></tr>
+                </tbody>
+            </table>
+
+            <p class="detail__error" th:if="${raw.error}" th:text="${raw.error}">错误</p>
+
+            <details class="detail__headers" th:if="${raw.hasHeaders()}">
+                <summary th:text="'响应头 ' + ${raw.responseHeaders.size()} + ' 项'">响应头</summary>
+                <table class="detail__table">
+                    <tbody>
+                    <tr th:each="header : ${raw.responseHeaders}">
+                        <th th:text="${header.name}">名</th>
+                        <td th:text="${header.value}">值</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </details>
+
+            <pre class="detail__body" th:if="${raw.hasBody()}"><code
+                    th:text="${fmt.prettyJson(raw.body)}">响应正文</code></pre>
+            <p class="detail__note" th:if="${raw.truncated}">正文已按 detail.max-body-chars 截断。</p>
+            <p class="detail__note" th:if="${!raw.hasBody()}">对端没有返回正文。</p>
+        </section>
+
+        <section class="detail__section" th:if="${app.hasRecoveredFailure()}"
+                 th:with="fail=${app.lastFailure}, raw=${app.lastFailure.detail}">
+            <h3 class="detail__subtitle"
+                th:text="'最近一次失败的原始应答（' + ${fmt.dateTime(fail.checkedAt)} + '）'">最近一次失败</h3>
+            <p class="detail__note">目标当前已恢复，这段是失败当时留下的现场。</p>
+            <table class="detail__table">
+                <tbody>
+                <tr><th>当时判定</th><td th:text="${fail.state.label}">异常</td></tr>
+                <tr th:if="${fail.message}"><th>说明</th><td th:text="${fail.message}">说明</td></tr>
+                <tr th:if="${raw != null}"><th>请求</th>
+                    <td><pre class="detail__pre" th:text="${raw.request}">GET ...</pre></td></tr>
+                <tr th:if="${raw != null and raw.statusLine != null}"><th>应答首行</th>
+                    <td th:text="${raw.statusLine}">503</td></tr>
+                <tr th:if="${raw != null and raw.error != null}"><th>错误</th>
+                    <td th:text="${raw.error}">错误</td></tr>
+                </tbody>
+            </table>
+            <pre class="detail__body" th:if="${raw != null and raw.hasBody()}"><code
+                    th:text="${fmt.prettyJson(raw.body)}">响应正文</code></pre>
+        </section>
+
+        <section class="detail__section" th:if="${!app.history.isEmpty()}">
+            <h3 class="detail__subtitle" th:text="'最近 ' + ${app.history.size()} + ' 次采样（由新到旧）'">最近采样</h3>
+            <ul class="detail__history">
+                <li th:each="sample : ${fmt.reversed(app.history)}">
+                    <span class="dot dot--sm" th:classappend="'is-' + ${sample.state.code}" aria-hidden="true"></span>
+                    <span th:text="${fmt.dateTime(sample.at)}">时间</span>
+                    <span th:text="${sample.state.label}">状态</span>
+                    <span th:text="${fmt.latency(sample.latencyMs)}">耗时</span>
+                </li>
+            </ul>
+        </section>
+
+    </div>
+</div>
+</body>
+</html>

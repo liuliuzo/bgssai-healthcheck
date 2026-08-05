@@ -3,8 +3,12 @@
  *
  * 数据区完全由服务端 Thymeleaf 片段渲染，这里只负责三件事：
  *   1. 定时（或手动）拉取 /fragments/dashboard 并替换 DOM
- *   2. 在客户端做搜索与状态筛选
- *   3. 主题切换
+ *   2. 在客户端做搜索、状态与类型筛选
+ *   3. 拉取 /fragments/apps/{id}/detail 塞进详情弹窗
+ *   4. 主题切换
+ *
+ * 弹窗内容刻意不跟着定时刷新走：排障时看的是「刚才那一刻对端返回了什么」，
+ * 内容在眼前被换掉只会让人分不清看的是哪一次探测。
  */
 (function () {
     'use strict';
@@ -15,6 +19,7 @@
 
     var refreshSeconds = parseInt(document.body.dataset.refreshSeconds || '0', 10);
     var filterState = 'all';
+    var filterType = 'all';
     var searchText = '';
     var remaining = refreshSeconds;
     var timerId = null;
@@ -61,8 +66,9 @@
         var visible = 0;
         cards.forEach(function (card) {
             var matchesState = filterState === 'all' || card.dataset.state === filterState;
+            var matchesType = filterType === 'all' || card.dataset.type === filterType;
             var matchesText = searchText === '' || (card.dataset.search || '').indexOf(searchText) !== -1;
-            var show = matchesState && matchesText;
+            var show = matchesState && matchesType && matchesText;
             card.hidden = !show;
             if (show) {
                 visible++;
@@ -186,6 +192,21 @@
         });
     }
 
+    var typeFilters = document.getElementById('type-filters');
+    if (typeFilters) {
+        typeFilters.addEventListener('click', function (event) {
+            var chip = event.target.closest('.chip');
+            if (!chip) {
+                return;
+            }
+            typeFilters.querySelectorAll('.chip').forEach(function (item) {
+                item.classList.toggle('is-active', item === chip);
+            });
+            filterType = chip.dataset.type;
+            applyFilters();
+        });
+    }
+
     var refreshNow = document.getElementById('refresh-now');
     if (refreshNow) {
         refreshNow.addEventListener('click', function () {
@@ -219,7 +240,59 @@
         });
     }
 
-    // 单个应用的「重新检查」按钮：卡片会被整体替换，所以用事件委托
+    /* ---------- 详情弹窗 ---------- */
+
+    function detailDialog() {
+        return document.getElementById('detail-dialog');
+    }
+
+    function openDetail(id) {
+        var dialog = detailDialog();
+        var body = document.getElementById('detail-body');
+        if (!dialog || !body) {
+            return;
+        }
+        body.textContent = '加载中…';
+        if (!dialog.open) {
+            dialog.showModal();
+        }
+        // 片段已由服务端用 th:text 转义过，这里只负责把它挂上去
+        fetch('/fragments/apps/' + encodeURIComponent(id) + '/detail', {
+            headers: {'Accept': 'text/html'},
+            cache: 'no-store'
+        }).then(function (response) {
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
+            return response.text();
+        }).then(function (html) {
+            body.innerHTML = html;
+        }).catch(function (error) {
+            body.textContent = '加载详情失败：' + error.message;
+        });
+    }
+
+    document.addEventListener('click', function (event) {
+        var trigger = event.target.closest('button[data-detail-id]');
+        if (trigger) {
+            openDetail(trigger.dataset.detailId);
+            return;
+        }
+        var closer = event.target.closest('#detail-close');
+        if (closer) {
+            var dialog = detailDialog();
+            if (dialog && dialog.open) {
+                dialog.close();
+            }
+            return;
+        }
+        // 点到 dialog 元素本身即点在遮罩上，内容区是它的子元素
+        if (event.target === detailDialog()) {
+            detailDialog().close();
+        }
+    });
+
+    // 单个目标的「重新检查」按钮：卡片会被整体替换，所以用事件委托
     document.addEventListener('click', function (event) {
         var button = event.target.closest('button[data-app-id]');
         if (!button) {

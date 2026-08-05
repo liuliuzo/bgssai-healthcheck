@@ -7,6 +7,7 @@ import com.bgssai.healthcheck.domain.HealthSample;
 import com.bgssai.healthcheck.domain.HealthState;
 import com.bgssai.healthcheck.domain.HealthStats;
 import com.bgssai.healthcheck.domain.HealthSummary;
+import com.bgssai.healthcheck.domain.ProbeDetail;
 import com.bgssai.healthcheck.domain.ProbeResult;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -35,7 +36,7 @@ public class HealthCheckService {
 
     private final ApplicationRegistry registry;
 
-    private final HttpHealthProbe probe;
+    private final HealthProbeDispatcher probe;
 
     private final HealthStatusStore store;
 
@@ -52,7 +53,7 @@ public class HealthCheckService {
 
     private volatile Instant lastRefreshAt;
 
-    public HealthCheckService(ApplicationRegistry registry, HttpHealthProbe probe, HealthStatusStore store,
+    public HealthCheckService(ApplicationRegistry registry, HealthProbeDispatcher probe, HealthStatusStore store,
             HealthCheckProperties properties) {
         this.registry = registry;
         this.probe = probe;
@@ -184,6 +185,7 @@ public class HealthCheckService {
     private AppHealth toAppHealth(MonitoredApplication app) {
         HealthStatusStore.Snapshot snapshot = this.store.snapshot(app.id()).orElse(null);
         ProbeResult latest = (snapshot != null) ? snapshot.latest() : null;
+        ProbeResult lastFailure = (snapshot != null) ? snapshot.lastFailure() : null;
         HealthStats stats = (snapshot != null) ? snapshot.stats() : HealthStats.empty();
         List<HealthSample> history = (snapshot != null) ? snapshot.history() : List.of();
 
@@ -193,6 +195,7 @@ public class HealthCheckService {
         long latency = 0L;
         Instant checkedAt = null;
         List<ProbeResult.ComponentStatus> components = List.of();
+        ProbeDetail detail = null;
 
         if (!app.enabled()) {
             state = HealthState.UNKNOWN;
@@ -209,11 +212,12 @@ public class HealthCheckService {
             latency = latest.latencyMs();
             checkedAt = latest.checkedAt();
             components = latest.components();
+            detail = latest.detail();
         }
 
-        return new AppHealth(app.id(), app.name(), app.group(), app.uri().toString(), app.description(), app.tags(),
-                app.critical(), app.enabled(), state, httpStatus, latency, checkedAt, message, components, stats,
-                history);
+        return new AppHealth(app.id(), app.name(), app.group(), app.type(), app.uri().toString(), app.description(),
+                app.tags(), app.critical(), app.enabled(), state, httpStatus, latency, checkedAt, message, components,
+                detail, stats, history, lastFailure);
     }
 
     private HealthSummary summaryOf(List<AppHealth> all) {

@@ -55,16 +55,21 @@ public enum HealthState {
     }
 
     /**
-     * 把 Actuator 的状态字符串映射为本枚举，无法识别时返回 {@link #UNKNOWN}。
+     * 把对端自报的状态字符串映射为本枚举，无法识别时返回 {@link #UNKNOWN}。
+     *
+     * <p>除 Actuator 与 Standards §13.2 的三值枚举外，还认 Elasticsearch 的集群颜色：
+     * {@code green} 是全部分片就绪，{@code yellow} 是主分片就绪但副本未分配（可用但劣化），
+     * {@code red} 是有主分片不可用。这三个词不与任何产品的自报状态冲突，因此直接并入本映射，
+     * 不需要为 Elasticsearch 单写一套解析。</p>
      */
     public static HealthState fromActuator(String raw) {
         if (raw == null || raw.isBlank()) {
             return UNKNOWN;
         }
         return switch (raw.trim().toUpperCase(Locale.ROOT)) {
-            case "UP", "OK", "HEALTHY", "PASS", "SUCCESS" -> UP;
-            case "DOWN", "ERROR", "FAIL", "UNHEALTHY", "CRITICAL" -> DOWN;
-            case "OUT_OF_SERVICE", "OUT-OF-SERVICE", "DEGRADED", "WARN", "WARNING" -> DEGRADED;
+            case "UP", "OK", "HEALTHY", "PASS", "SUCCESS", "GREEN" -> UP;
+            case "DOWN", "ERROR", "FAIL", "UNHEALTHY", "CRITICAL", "RED" -> DOWN;
+            case "OUT_OF_SERVICE", "OUT-OF-SERVICE", "DEGRADED", "WARN", "WARNING", "YELLOW" -> DEGRADED;
             default -> UNKNOWN;
         };
     }

@@ -38,11 +38,13 @@ class TlsVerificationProbeTests {
 
     private static ProbeResult probeWith(boolean skipTlsVerification) {
         Probe probe = new Probe(Duration.ofSeconds(3), Duration.ofSeconds(5), false, 65536, false);
-        Target target = new Target("stub", "stub", "g", STUB.url("/bgssai/health/readiness"), "GET",
-                true, false, List.of(), Map.of(), null, null, null, null, List.of(), null,
+        Target target = new Target("stub", "stub", "g", STUB.url("/bgssai/health/readiness"), null, "GET",
+                true, false, List.of(), Map.of(), null, null, null, null, List.of(), List.of(), null,
                 skipTlsVerification);
         HealthCheckProperties properties = new HealthCheckProperties(false, Duration.ofSeconds(30),
-                Duration.ofSeconds(3), 16, 60, 10, probe, List.of(target));
+                Duration.ofSeconds(3), 16, 60, 10, probe,
+                new HealthCheckProperties.Detail(true, 16384, true), new HealthCheckProperties.Redis(90),
+                new HealthCheckProperties.Mysql(90, 3), List.of(target));
 
         ApplicationRegistry registry = new ApplicationRegistry(properties);
         MonitoredApplication app = registry.findAll().get(0);

@@ -32,6 +32,14 @@ final class StubHealthServer implements AutoCloseable {
             "result":{"status":"DOWN","app":"bgssai-vpn-user","checked_at":"2026-07-31 10:24:05",\
             "components":[{"name":"db","status":"DOWN"},{"name":"mybatis","status":"DOWN"}]}}""";
 
+    /** Elasticsearch 的 _cluster/health：顶层 status 是集群颜色，指标全部平铺在同一层。 */
+    private static final String ELASTICSEARCH_YELLOW = """
+            {"cluster_name":"elasticsearch","status":"yellow","timed_out":false,"number_of_nodes":1,\
+            "number_of_data_nodes":1,"active_primary_shards":10,"active_shards":10,"relocating_shards":0,\
+            "initializing_shards":0,"unassigned_shards":3,"delayed_unassigned_shards":0,\
+            "number_of_pending_tasks":0,"number_of_in_flight_fetch":0,"task_max_waiting_in_queue_millis":0,\
+            "active_shards_percent_as_number":76.9}""";
+
     /** BGSSAI 产品线形态二：健康负载包在 {code, message, data} 封装里，且整体只是降级（HTTP 仍 200）。 */
     private static final String WRAPPED_DATA_DEGRADED = """
             {"code":0,"message":"OK",\
@@ -63,6 +71,8 @@ final class StubHealthServer implements AutoCloseable {
         this.server.createContext("/plain", respond(200, "text/plain", "OK"));
         // 用 204 表示健康的接口
         this.server.createContext("/no-content", respond(204, "text/plain", ""));
+        // Elasticsearch 集群健康：green / yellow / red 是它自己的状态词汇
+        this.server.createContext("/_cluster/health", respond(200, "application/json", ELASTICSEARCH_YELLOW));
         // 慢接口，用来触发读超时
         this.server.createContext("/slow", exchange -> {
             try {

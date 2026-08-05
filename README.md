@@ -128,31 +128,43 @@ Actuator 的 `{"components": {"db": {...}}}`（键即组件名），以及 BGSSA
 ### 巡检 BGSSAI 产品线应用
 
 9 个产品 × 管理端 / 用户端共 18 个后端，巡检地址统一为 `/bgssai/health/readiness`（Standards §13.7）。
-巡检目标已按真实地址列全并启用，放在两份 profile 文件里（Standards §1：随环境变化的项一律下沉到
-profile）：
+巡检目标已按真实地址列全并启用，四份配置文件**各写一份完整的 19 条**（`[0]` 平台自身 + `[1]`..`[18]`）：
 
-| 文件 | 环境 | 条目 |
+| 文件 | 生效条件 | 巡检目标 |
 |---|---|---|
-| `src/main/resources/application-prod.properties` | 生产（华为云-境内-上海一 + 腾讯云） | `[0]` 平台自身 + `[1]`..`[18]` 共 19 条 |
-| `src/main/resources/application-dev.properties`  | 开发（华为云-境外-墨西哥二 + 腾讯云） | 同上 19 条 |
+| `src/main/resources/application.properties` | 不指定 profile（默认档） | 生产（华为云-境内-上海一 + 腾讯云） |
+| `src/main/resources/application-prod.properties` | `SPRING_PROFILES_ACTIVE=prod` | 同上，与主配置逐条一致 |
+| `src/main/resources/application-dev.properties` | `SPRING_PROFILES_ACTIVE=dev` | 开发（华为云-境外-墨西哥二 + 腾讯云） |
+| `src/main/resources/application-local.properties` | `SPRING_PROFILES_ACTIVE=local` | 同 dev，笔记本本机启动用 |
 
-启动时用 `SPRING_PROFILES_ACTIVE=prod`（或 `dev`）选定。**不指定 profile 时列表为空**，应用照常启动、
-看板显示「还没有配置被监控的应用」。
+**主配置自带整份基线，因此 `java -jar app.jar` 不带 profile 也能看到 19 个应用**，看板不再显示
+「还没有配置被监控的应用」；Jenkins 部署仍注入 `--spring.profiles.active=<env>`，命中哪一档就整份
+换成那一档的地址。
+
+**为什么四份文件各写一遍，而不是主配置写公共部分、profile 只写差异**：Spring Boot 绑定集合时
+**不跨 property source 合并**，只从优先级最高的那个源整份取。profile 文件优先级高于主配置，一旦
+它出现 `applications` 键，主配置那份就整份失效；此时 profile 文件若只写 `[1..18]`、指望 `[0]` 从
+主配置补上，绑定器会在下标 0 处遇到空洞并抛「left unbound」启动失败。代价是同一批应用在四个文件
+里各有一份，改一处忘一处既没有编译期报错也没有启动期报错，只会在切换 profile 后悄悄探测到过时的
+地址——所以由 `ConfigurationFilesConsistencyTests` 守护：主配置与 prod 档、local 档与 dev 档必须
+逐条一致，四份文件的应用清单与顺序必须相同，任一条对不上 `./mvnw test`（部署构建同样会跑）直接失败。
 
 三个决定 URL 长相的事实，改地址前务必知道：
 
 1. **端口是 443、协议是 HTTPS**。18 个后端在 dev / prod 都是 `server.port=443` + `server.ssl.enabled=true`
    （各产品仓 profile 实测），`8080` / `8081` 只是本地开发端口。
 2. **用公网 IP**。境内华为云私网是 `172.31.x`、境外是 `192.168.0.x`，属两个不同区域 / VPC，一台机器
-   走不通对面私网；腾讯云 SaaS 更是只有公网 IP。只有公网 IP 这一套能同时覆盖三处。**若本平台就部署在
-   某一侧 VPC 内**，把该侧条目换成私网 IP 更省流量——每条的私网地址都写在它上方的注释里。
+   走不通对面私网；腾讯云 SaaS 更是只有公网 IP。只有公网 IP 这一套能同时覆盖三处。本平台部署在境内
+   `123.60.68.201`（私网 `172.31.6.116`），与生产档 14 条境内条目同属 `172.31.x`，**想省公网流量可把
+   这 14 条换成私网地址**（每条的私网地址都写在它上方的注释里）；GEO 海外与腾讯云 SaaS 这 4 条，以及
+   整份 dev 档（境外 `192.168.0.x`），只能走公网。
 3. **`skip-tls-verification=true`**。证书签给的是业务域名（`www.bgssai-blog.com` 等），而这里按机器 IP
    直连，TLS 握手会因主机名不匹配失败，健康的应用会被整片误判为 DOWN。见下一节。
 
 ### 跳过证书校验：为什么开、以及怎么关掉它
 
 `bgssai.healthcheck.probe.skip-tls-verification`（全局默认，出厂 `false`）与每条目的
-`applications[n].skip-tls-verification`（覆盖全局）控制是否放开证书链与主机名校验。当前两份 profile
+`applications[n].skip-tls-verification`（覆盖全局）控制是否放开证书链与主机名校验。当前四份配置文件
 里 18 条产品后端都显式打开了它。
 
 **放开的只是本平台这一个出站客户端**，用一个仅供该目标使用的 `SSLContext`，不碰 JVM 全局默认值，
@@ -243,6 +255,11 @@ $ curl -s localhost:8080/api/summary
 测试用 JDK 自带的 `HttpServer` 模拟被监控应用（见 `StubHealthServer`），覆盖 200/503/204、
 非 JSON 响应、404、连接被拒、读超时等场景，不依赖外部网络。
 
+`ConfigurationFilesConsistencyTests` 只读四份 `.properties`、不发任何网络请求（也不会启动上下文去
+连生产地址），断言四件事：主配置自带整份 19 条基线、主配置与 prod 档逐条一致、local 档与 dev 档逐条
+一致、按真实 ConfigData 加载顺序装配环境后各档覆盖语义符合预期（prod 得到基线地址、dev 得到开发地址）。
+改巡检目标时它是唯一会拦住「只改了一个文件」的关卡。
+
 ## 部署
 
 Jenkins 主通道：`bgssai-healthcheck deploy(dev|prod)` / `stop(dev|prod)`。单实例、无
@@ -268,9 +285,10 @@ src/main/java/com/bgssai/healthcheck/
     └── ViewFormatter.java                   # 页面格式化
 
 src/main/resources/
-├── application.properties          # 巡检行为阈值（三环境不变量）
-├── application-prod.properties     # 生产 19 个巡检目标
+├── application.properties          # 巡检行为阈值 + 基线 19 个巡检目标（= 生产，不指定 profile 时生效）
+├── application-prod.properties     # 生产 19 个巡检目标（与主配置逐条一致）
 ├── application-dev.properties      # 开发 19 个巡检目标
+├── application-local.properties    # 本机启动，目标同 dev
 ├── templates/index.html
 └── static/{css/app.css, js/app.js, favicon.svg}
 ```

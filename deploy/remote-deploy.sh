@@ -117,7 +117,10 @@ ensure_service() {
     done
   fi
   if [[ -z "${java_bin}" || ! -x "${java_bin}" ]]; then
-    log "ERROR: java executable not found on PATH and no usable fallback under /usr/bin/java or /usr/lib/jvm; refusing to write a broken systemd unit (would yield status=203/EXEC)"
+    # geo-global 等新机常见：单元写了 /usr/bin/java 但系统未装 JDK → systemd 203/EXEC。
+    # 本脚本**只检测不安装**：JDK 属于目标机基线环境，由人工按 deploy/README.md 预装，
+    # 部署过程不改动目标机的软件包（不跑 apt-get / yum）。缺则直接失败并给出安装指引。
+    log "ERROR: java executable not found on PATH and no usable fallback under /usr/bin/java or /usr/lib/jvm; refusing to write a broken systemd unit (would yield status=203/EXEC). Install JDK 21 on the host (e.g. apt-get install -y openjdk-21-jre-headless) and redeploy."
     return 1
   fi
   unit_path="/etc/systemd/system/${SERVICE_NAME}.service"
@@ -407,8 +410,16 @@ health_check() {
 }
 
 # systemd 自托管模式：首次部署时自动创建并 enable 服务（开机自启）。
+# java 缺失时 ensure_service 会拒绝写入坏单元；若本机也没有既有 unit，继续 restart
+# 只会得到 status=203/EXEC，因此直接失败，避免空跑健康检查与误导性回滚。
 if [[ "${AUTO_PROVISION}" == "true" ]]; then
-  ensure_service || log "auto-provision service failed; will still attempt restart"
+  if ! ensure_service; then
+    if [[ ! -f "/etc/systemd/system/${SERVICE_NAME}.service" ]]; then
+      log "ERROR: auto-provision failed and no existing systemd unit for ${SERVICE_NAME}; aborting before restart"
+      exit 1
+    fi
+    log "auto-provision service failed; will still attempt restart with existing unit"
+  fi
 fi
 
 # 重启失败一律视为部署失败并进入回滚，绝不因端口仍被旧进程占用而误报成功。

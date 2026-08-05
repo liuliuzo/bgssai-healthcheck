@@ -29,6 +29,11 @@
 服务不存在时由 `remote-deploy.sh` 自动创建并 enable，无需手工装单元。参考单元见
 `deploy/systemd/bgssai-healthcheck.service`（可选加固用）。
 
+**前置：目标机须预装 JDK 21**（应用以 `/usr/bin/java` 启动）。`remote-deploy.sh` **只检测不安装**，
+不会改动目标机的软件包；未装 JDK 时会在写单元前直接失败并提示
+`sudo apt-get install -y openjdk-21-jre-headless`（yum 系用 `sudo yum install -y java-21-openjdk-headless`），
+装好后用单产品 Job 人工重跑。
+
 ## 运维注意
 
 - **同机覆盖**：dev / prod 部署同一台机、同一个 systemd 服务；后一次部署会覆盖前一次的

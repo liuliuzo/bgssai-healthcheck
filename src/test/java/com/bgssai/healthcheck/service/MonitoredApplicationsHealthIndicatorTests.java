@@ -1,7 +1,10 @@
 package com.bgssai.healthcheck.service;
 
 import com.bgssai.healthcheck.config.HealthCheckProperties;
+import com.bgssai.healthcheck.config.HealthCheckProperties.Detail;
+import com.bgssai.healthcheck.config.HealthCheckProperties.Mysql;
 import com.bgssai.healthcheck.config.HealthCheckProperties.Probe;
+import com.bgssai.healthcheck.config.HealthCheckProperties.Redis;
 import com.bgssai.healthcheck.config.HealthCheckProperties.Target;
 import com.bgssai.healthcheck.domain.HealthState;
 import com.bgssai.healthcheck.domain.ProbeResult;
@@ -21,7 +24,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 平台自身健康状态与被监控应用之间的关系。
+ * 平台自身健康状态与被监控目标之间的关系。
  */
 class MonitoredApplicationsHealthIndicatorTests {
 
@@ -34,13 +37,14 @@ class MonitoredApplicationsHealthIndicatorTests {
     @BeforeEach
     void setUp() {
         HealthCheckProperties properties = new HealthCheckProperties(false, Duration.ofSeconds(30),
-                Duration.ofSeconds(3), 4, 10, 0, PROBE,
+                Duration.ofSeconds(3), 4, 10, 0, PROBE, new Detail(true, 4096, true), new Redis(90), new Mysql(90, 3),
                 List.of(target("core", "核心服务", true), target("side", "边缘服务", false)));
 
         ApplicationRegistry registry = new ApplicationRegistry(properties);
         this.store = new HealthStatusStore(properties);
         HttpHealthProbe probe = new HttpHealthProbe(RestClient.builder(), JsonMapper.builder().build(), properties);
-        HealthCheckService service = new HealthCheckService(registry, probe, this.store, properties);
+        HealthProbeDispatcher dispatcher = new HealthProbeDispatcher(List.of(probe), registry, properties);
+        HealthCheckService service = new HealthCheckService(registry, dispatcher, this.store, properties);
         this.indicator = new MonitoredApplicationsHealthIndicator(service);
     }
 
@@ -54,17 +58,17 @@ class MonitoredApplicationsHealthIndicatorTests {
     }
 
     @Test
-    @DisplayName("非关键应用异常不影响平台自身状态")
+    @DisplayName("非关键目标异常不影响平台自身状态")
     void nonCriticalFailureKeepsPlatformUp() {
-        this.store.record("side", ProbeResult.failure(12L, Instant.now(), "连接被拒绝"));
+        this.store.record("side", ProbeResult.failure(12L, Instant.now(), "连接被拒绝", null));
 
         assertThat(this.indicator.health().getStatus()).isEqualTo(Status.UP);
     }
 
     @Test
-    @DisplayName("关键应用异常时平台报 DOWN 并列出应用名")
+    @DisplayName("关键目标异常时平台报 DOWN 并列出名称")
     void criticalFailureMarksPlatformDown() {
-        this.store.record("core", ProbeResult.failure(12L, Instant.now(), "连接被拒绝"));
+        this.store.record("core", ProbeResult.failure(12L, Instant.now(), "连接被拒绝", null));
 
         Health health = this.indicator.health();
 
@@ -73,19 +77,19 @@ class MonitoredApplicationsHealthIndicatorTests {
     }
 
     @Test
-    @DisplayName("关键应用恢复后平台状态跟着恢复")
+    @DisplayName("关键目标恢复后平台状态跟着恢复")
     void recoveryRestoresPlatformHealth() {
-        this.store.record("core", ProbeResult.failure(12L, Instant.now(), "连接被拒绝"));
+        this.store.record("core", ProbeResult.failure(12L, Instant.now(), "连接被拒绝", null));
         assertThat(this.indicator.health().getStatus()).isEqualTo(Status.DOWN);
 
         this.store.record("core",
-                ProbeResult.of(HealthState.UP, 200, 8L, Instant.now(), null, List.of()));
+                ProbeResult.of(HealthState.UP, 200, 8L, Instant.now(), null, List.of(), null));
 
         assertThat(this.indicator.health().getStatus()).isEqualTo(Status.UP);
     }
 
     private static Target target(String id, String name, boolean critical) {
-        return new Target(id, name, "测试", "http://127.0.0.1:1/health", "GET", true, critical, List.of(), Map.of(),
-                null, null, null, null, List.of(), null, null);
+        return new Target(id, name, "测试", "http://127.0.0.1:1/health", null, "GET", true, critical, List.of(),
+                Map.of(), null, null, null, null, List.of(), List.of(), null, null);
     }
 }

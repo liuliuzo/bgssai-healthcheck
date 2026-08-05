@@ -2,8 +2,10 @@ package com.bgssai.healthcheck.service;
 
 import com.bgssai.healthcheck.config.HealthCheckProperties;
 import com.bgssai.healthcheck.domain.HealthState;
+import com.bgssai.healthcheck.domain.ProbeDetail;
 import com.bgssai.healthcheck.domain.ProbeResult;
 import com.bgssai.healthcheck.domain.ProbeResult.ComponentStatus;
+import com.bgssai.healthcheck.domain.TargetType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
@@ -40,20 +42,25 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 通过 HTTP 调用被监控应用的健康检查接口，并把响应归一化为 {@link ProbeResult}。
+ * 通过 HTTP 调用被监控目标的健康检查接口，并把响应归一化为 {@link ProbeResult}。
  *
  * <p>解析优先级：响应体里的状态字段 &gt; HTTP 状态码。这样才能正确处理 Actuator
  * 用 503 + {@code {"status":"DOWN"}} 表达异常、用 200 + {@code {"status":"OUT_OF_SERVICE"}}
  * 表达降级的两种约定。</p>
  *
+ * <p>同时负责 {@link TargetType#ELASTICSEARCH}：它的集群健康接口就是一个普通的
+ * HTTPS GET，请求、TLS、超时、明细捕获全都一样，差别只在于响应体里 {@code status}
+ * 是集群颜色、以及能多解析出几个分片指标——为它另开一个探针只会把这些逻辑复制一遍。</p>
+ *
  * <p>本类不抛异常：任何失败都会转换成一个 DOWN 的 {@link ProbeResult}。</p>
  */
 @Component
-public class HttpHealthProbe {
+public class HttpHealthProbe implements HealthProbe {
 
     private static final Logger log = LoggerFactory.getLogger(HttpHealthProbe.class);
 
@@ -122,9 +129,15 @@ public class HttpHealthProbe {
         this.settings = properties.probe();
     }
 
+    @Override
+    public Set<TargetType> supportedTypes() {
+        return Set.of(TargetType.HTTP, TargetType.ELASTICSEARCH);
+    }
+
     /**
-     * 探测一个应用，无论成功失败都会返回结果。
+     * 探测一个目标，无论成功失败都会返回结果。
      */
+    @Override
     public ProbeResult probe(MonitoredApplication app) {
         Instant startedAt = Instant.now();
         long startNanos = System.nanoTime();
@@ -137,15 +150,17 @@ public class HttpHealthProbe {
         catch (Exception ex) {
             long latency = elapsedMs(startNanos);
             String reason = describeFailure(ex);
-            log.debug("探测应用 [{}] ({}) 失败：{}", app.id(), app.uri(), reason);
-            return ProbeResult.failure(latency, startedAt, reason);
+            log.debug("探测目标 [{}] ({}) 失败：{}", app.id(), app.uri(), reason);
+            return ProbeResult.failure(latency, startedAt, reason,
+                    ProbeDetail.failed("HTTP", describeRequest(app), null, reason));
         }
     }
 
     private ProbeResult evaluate(MonitoredApplication app, ClientHttpResponse response, Instant startedAt,
             long startNanos) throws IOException {
         HttpStatusCode statusCode = response.getStatusCode();
-        String body = readBody(response);
+        Body read = readBody(response);
+        String body = read.text();
         long latency = elapsedMs(startNanos);
 
         boolean httpAccepted = app.expectedStatuses().isEmpty()
@@ -176,7 +191,50 @@ public class HttpHealthProbe {
                 message = "自报状态 " + parsed.rawStatus() + "（" + describeStatus(statusCode) + "）";
             }
         }
-        return ProbeResult.of(state, statusCode.value(), latency, startedAt, message, parsed.components());
+
+        List<ComponentStatus> components = parsed.components();
+        if (app.type() == TargetType.ELASTICSEARCH) {
+            components = elasticsearchComponents(parsed, components);
+            String clusterNote = describeCluster(parsed);
+            if (clusterNote != null) {
+                message = (message == null) ? clusterNote : message + "；" + clusterNote;
+            }
+        }
+
+        ProbeDetail detail = new ProbeDetail("HTTP", describeRequest(app), statusLine(statusCode),
+                responseHeaders(response), body, read.bytes(), false, read.error());
+        return ProbeResult.of(state, statusCode.value(), latency, startedAt, message, components, detail);
+    }
+
+    /**
+     * 请求摘要：第一行是方法与地址，随后逐行列出实际发出的请求头。
+     *
+     * <p>抽成方法是因为成功与失败两条路径都要用它——失败时恰恰最需要知道「我们到底发了什么」。
+     * 认证类请求头的值一律换成占位符，明细会原样出现在看板与报告里。</p>
+     */
+    private static String describeRequest(MonitoredApplication app) {
+        StringBuilder sb = new StringBuilder(app.method().name()).append(' ').append(app.uri());
+        app.headers().forEach((name, value) -> sb.append('\n')
+                .append(name)
+                .append(": ")
+                .append(ProbeSecrets.maskHeader(name, value)));
+        if (app.authorization() != null) {
+            sb.append('\n').append(HttpHeaders.AUTHORIZATION).append(": ").append(ProbeSecrets.MASK);
+        }
+        return sb.toString();
+    }
+
+    private static List<ProbeDetail.Header> responseHeaders(ClientHttpResponse response) {
+        List<ProbeDetail.Header> headers = new ArrayList<>();
+        response.getHeaders().forEach((name, values) -> headers.add(
+                new ProbeDetail.Header(name, ProbeSecrets.maskHeader(name, String.join(", ", values)))));
+        return headers;
+    }
+
+    private static String statusLine(HttpStatusCode statusCode) {
+        HttpStatus resolved = HttpStatus.resolve(statusCode.value());
+        return (resolved != null) ? resolved.value() + " " + resolved.getReasonPhrase()
+                : String.valueOf(statusCode.value());
     }
 
     private RestClient clientFor(MonitoredApplication app) {
@@ -236,24 +294,30 @@ public class HttpHealthProbe {
         }
         catch (GeneralSecurityException ex) {
             // 装配失败时退回标准校验：宁可这条目标报证书错误，也不要让整个平台起不来。
-            log.warn("应用 [{}] 配置了跳过证书校验，但 SSLContext 装配失败（{}），本条改用标准校验",
+            log.warn("目标 [{}] 配置了跳过证书校验，但 SSLContext 装配失败（{}），本条改用标准校验",
                     app.id(), ex.getClass().getSimpleName());
             return this.requestFactoryBuilder.build(standardSettings(app));
         }
     }
 
-    private String readBody(ClientHttpResponse response) {
+    /**
+     * 读响应体。
+     *
+     * <p>返回值区分「对端就是没给正文」与「我们没读成功」：前者是正常情况（HEAD、204），
+     * 后者要写进明细的 error，否则看板上会出现一个空白的原始应答，让人误以为对端返回了空。</p>
+     */
+    private Body readBody(ClientHttpResponse response) {
         int limit = this.settings.maxBodyBytes();
         if (limit <= 0) {
-            return "";
+            return new Body("", 0, null);
         }
         try (InputStream in = response.getBody()) {
             byte[] bytes = in.readNBytes(limit);
-            return new String(bytes, charsetOf(response.getHeaders().getContentType()));
+            return new Body(new String(bytes, charsetOf(response.getHeaders().getContentType())), bytes.length, null);
         }
         catch (IOException | RuntimeException ex) {
             log.debug("读取响应体失败：{}", ex.toString());
-            return "";
+            return new Body("", 0, "读取响应体失败：" + ex.getClass().getSimpleName());
         }
     }
 
@@ -279,7 +343,7 @@ public class HttpHealthProbe {
         Map<?, ?> payload = unwrapEnvelope(root);
         String rawStatus = readStatus(payload);
         HealthState state = (rawStatus != null) ? HealthState.fromActuator(rawStatus) : null;
-        return new ParsedBody(state, rawStatus, readComponents(payload));
+        return new ParsedBody(state, rawStatus, readComponents(payload), payload);
     }
 
     /**
@@ -357,11 +421,16 @@ public class HttpHealthProbe {
         if (result.isEmpty()) {
             return List.of();
         }
-        result.sort((left, right) -> {
+        return sortBySeverity(result);
+    }
+
+    static List<ComponentStatus> sortBySeverity(List<ComponentStatus> components) {
+        List<ComponentStatus> sorted = new ArrayList<>(components);
+        sorted.sort((left, right) -> {
             int bySeverity = Integer.compare(right.state().getSeverity(), left.state().getSeverity());
             return (bySeverity != 0) ? bySeverity : left.name().compareToIgnoreCase(right.name());
         });
-        return result;
+        return List.copyOf(sorted);
     }
 
     private static Map<String, String> readComponentDetails(Map<?, ?> component) {
@@ -376,6 +445,75 @@ public class HttpHealthProbe {
             }
         });
         return flattened;
+    }
+
+    /**
+     * 把 {@code _cluster/health} 的扁平数字字段拆成三个子组件。
+     *
+     * <p>Elasticsearch 不返回 {@code components}，所有指标都平铺在顶层，直接展示等于让人在
+     * 一行 JSON 里数字段。拆成 cluster / shards / tasks 之后，卡片展开就能看出「黄是因为
+     * 有几个分片没分配」还是「节点少了一台」。</p>
+     */
+    private static List<ComponentStatus> elasticsearchComponents(ParsedBody parsed, List<ComponentStatus> fallback) {
+        Map<?, ?> payload = parsed.payload();
+        if (payload == null || payload.isEmpty()) {
+            return fallback;
+        }
+        List<ComponentStatus> components = new ArrayList<>();
+        HealthState clusterState = (parsed.state() != null) ? parsed.state() : HealthState.UNKNOWN;
+        components.add(new ComponentStatus("cluster", clusterState,
+                pick(payload, "cluster_name", "number_of_nodes", "number_of_data_nodes", "timed_out")));
+
+        long unassigned = readLong(payload, "unassigned_shards");
+        components.add(new ComponentStatus("shards", (unassigned > 0L) ? HealthState.DEGRADED : HealthState.UP,
+                pick(payload, "active_shards", "active_primary_shards", "relocating_shards", "initializing_shards",
+                        "unassigned_shards", "delayed_unassigned_shards", "active_shards_percent_as_number")));
+
+        // 待处理任务瞬时不为 0 是正常的，只报数不参与判定
+        components.add(new ComponentStatus("tasks", HealthState.UP,
+                pick(payload, "number_of_pending_tasks", "number_of_in_flight_fetch",
+                        "task_max_waiting_in_queue_millis")));
+        return sortBySeverity(components);
+    }
+
+    private static String describeCluster(ParsedBody parsed) {
+        if (parsed.rawStatus() == null || parsed.state() == HealthState.UP) {
+            return null;
+        }
+        long unassigned = readLong(parsed.payload(), "unassigned_shards");
+        String note = "集群颜色 " + parsed.rawStatus();
+        return (unassigned > 0L) ? note + "，未分配分片 " + unassigned + " 个" : note;
+    }
+
+    /** 只挑存在的键，缺字段就不写——写成 "null" 反而让人以为对端返回了这个值。 */
+    private static Map<String, String> pick(Map<?, ?> payload, String... keys) {
+        Map<String, String> picked = new LinkedHashMap<>();
+        for (String key : keys) {
+            Object value = payload.get(key);
+            if (value != null && !(value instanceof Map) && !(value instanceof List)) {
+                picked.put(key, String.valueOf(value));
+            }
+        }
+        return picked;
+    }
+
+    private static long readLong(Map<?, ?> payload, String key) {
+        if (payload == null) {
+            return 0L;
+        }
+        Object value = payload.get(key);
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Long.parseLong(text.trim());
+            }
+            catch (NumberFormatException ex) {
+                return 0L;
+            }
+        }
+        return 0L;
     }
 
     private static String describeStatus(HttpStatusCode statusCode) {
@@ -412,11 +550,19 @@ public class HttpHealthProbe {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
     }
 
-    /** 已解析的响应体内容。{@code state} 为 {@code null} 表示响应体里没有可识别的状态。 */
-    private record ParsedBody(HealthState state, String rawStatus, List<ComponentStatus> components) {
+    /** 读到的响应体正文、字节数，以及读取失败时的原因。 */
+    private record Body(String text, int bytes, String error) {
+    }
+
+    /**
+     * 已解析的响应体内容。{@code state} 为 {@code null} 表示响应体里没有可识别的状态；
+     * {@code payload} 是剥掉封装后的那一层，Elasticsearch 的指标要从它上面取。
+     */
+    private record ParsedBody(HealthState state, String rawStatus, List<ComponentStatus> components,
+            Map<?, ?> payload) {
 
         static ParsedBody empty() {
-            return new ParsedBody(null, null, List.of());
+            return new ParsedBody(null, null, List.of(), Map.of());
         }
     }
 }

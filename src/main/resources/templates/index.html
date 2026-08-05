@@ -25,6 +25,10 @@
         </label>
         <span class="countdown" id="countdown" aria-live="polite"></span>
         <button type="button" class="btn btn--primary" id="refresh-now">立刻巡检</button>
+        <a class="btn" th:href="@{/api/report.md}" download
+           title="下载 Markdown 报告，含每个目标的原始应答与当前巡检配置">下载报告</a>
+        <a class="btn btn--ghost" th:href="@{/api/report.md(download=false)}" target="_blank"
+           rel="noopener noreferrer" title="在浏览器里直接查看报告">预览报告</a>
         <button type="button" class="btn btn--icon" id="theme-toggle" title="切换深浅色主题"
                 aria-label="切换深浅色主题">◑</button>
     </div>
@@ -43,6 +47,14 @@
             <button type="button" class="chip" data-state="degraded">降级</button>
             <button type="button" class="chip" data-state="down">异常</button>
             <button type="button" class="chip" data-state="unknown">未知</button>
+        </div>
+        <div class="filters" id="type-filters" role="group" aria-label="按类型筛选">
+            <button type="button" class="chip is-active" data-type="all">全部类型</button>
+            <button type="button" class="chip" data-type="http">HTTP 接口</button>
+            <button type="button" class="chip" data-type="elasticsearch">Elasticsearch</button>
+            <button type="button" class="chip" data-type="redis">Redis</button>
+            <button type="button" class="chip" data-type="mysql">MySQL</button>
+            <button type="button" class="chip" data-type="tcp">TCP 端口</button>
         </div>
     </section>
 
@@ -78,7 +90,7 @@
         </section>
 
         <p class="empty" th:if="${dashboard.groups.isEmpty()}">
-            还没有配置被监控的应用。请在 <code>application.properties</code> 的
+            还没有配置被监控的目标。请在 <code>application.properties</code> 的
             <code>bgssai.healthcheck.applications</code> 下添加应用及其健康检查地址。
         </p>
 
@@ -93,12 +105,13 @@
             <div class="cards">
                 <article class="card" th:each="app : ${group.apps}"
                          th:classappend="'is-' + ${app.state.code} + (${app.enabled} ? '' : ' is-disabled')"
-                         th:attr="data-state=${app.state.code},data-search=${fmt.searchKey(app)}">
+                         th:attr="data-state=${app.state.code},data-type=${app.type.code},data-search=${fmt.searchKey(app)}">
 
                     <header class="card__head">
                         <span class="dot" th:classappend="'is-' + ${app.state.code}" aria-hidden="true"></span>
-                        <h3 class="card__title" th:text="${app.name}">应用名称</h3>
-                        <span class="badge" th:if="${app.critical}" title="关键应用异常会影响平台自身的健康状态">关键</span>
+                        <h3 class="card__title" th:text="${app.name}">目标名称</h3>
+                        <span class="tag tag--type" th:text="${app.type.label}">类型</span>
+                        <span class="badge" th:if="${app.critical}" title="关键目标异常会影响平台自身的健康状态">关键</span>
                         <span class="badge badge--muted" th:if="${!app.enabled}">已停用</span>
                         <span class="pill" th:classappend="'is-' + ${app.state.code}"
                               th:text="${app.state.label}">未知</span>
@@ -157,6 +170,8 @@
                             <span class="card__stats"
                                   th:if="${app.stats.consecutiveFailures} > 0"
                                   th:text="'连续失败 ' + ${app.stats.consecutiveFailures} + ' 次'">连续失败</span>
+                            <button type="button" class="btn btn--ghost"
+                                    th:attr="data-detail-id=${app.id}">查看详情</button>
                             <button type="button" class="btn btn--ghost" th:if="${app.enabled}"
                                     th:attr="data-app-id=${app.id}">重新检查</button>
                         </div>
@@ -170,9 +185,17 @@
 
 </main>
 
+<dialog id="detail-dialog" class="dialog" aria-label="目标详情">
+    <div class="dialog__head">
+        <span class="dialog__title">目标详情</span>
+        <button type="button" class="btn btn--icon" id="detail-close" aria-label="关闭">×</button>
+    </div>
+    <div id="detail-body" class="dialog__body"></div>
+</dialog>
+
 <footer class="pagefoot">
     <span>BGSSAI 应用健康巡检 · Spring Boot 4.1 / Java 21</span>
-    <span>接口：<code>/api/apps</code> · <code>/api/summary</code> · <code>/api/dashboard</code></span>
+    <span>接口：<code>/api/apps</code> · <code>/api/summary</code> · <code>/api/dashboard</code> · <code>/api/report.md</code></span>
 </footer>
 
 <script th:src="@{/js/app.js}"></script>

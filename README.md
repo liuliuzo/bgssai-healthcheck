@@ -1,10 +1,18 @@
 # bgssai-healthcheck
 
-通过接口巡检各应用健康状态，并用一个服务端渲染的看板集中展示。
+巡检各应用的健康接口，并直连数据库与中间件，用一个服务端渲染的看板集中展示。
 
 - **Java 21** + **Spring Boot 4.1.0**
 - 前端使用 Spring Boot 自带的 **Thymeleaf** 模板引擎，无需 Node 工具链，页面资源全部内置
-- 巡检结果同时通过 **REST 接口** 和 **看板页面** 对外提供
+- 五类被监控目标：HTTP 健康接口、Elasticsearch、Redis、MySQL、TCP 端口
+- 每次探测都留下**原始请求与应答**，看板上可展开查看，凭据在写入前已脱敏
+- 巡检结果通过 **REST 接口**、**看板页面** 和 **可下载的 Markdown 报告** 三处对外提供
+
+| 地址 | 说明 |
+| --- | --- |
+| `/` | 健康状态看板 |
+| `/api/report.md` | 可下载的 Markdown 巡检报告 |
+| `/actuator/health` | 平台自身的健康端点 |
 
 ## 快速开始
 
@@ -22,9 +30,10 @@ java -jar target/bgssai-healthcheck-0.0.1-SNAPSHOT.jar
 | 地址 | 说明 |
 | --- | --- |
 | <http://localhost:8080/> | 健康状态看板 |
+| <http://localhost:8080/api/report.md> | 下载 Markdown 巡检报告 |
 | <http://localhost:8080/actuator/health> | 平台自身的健康端点 |
 
-## 配置被监控的应用
+## 配置被监控的目标
 
 全部配置项都在 `application.properties` 的 `bgssai.healthcheck` 下。**本仓统一用 `.properties`，
 不用 `.yml` / `.yaml`。** 与之配套有三条硬性写法，改配置前务必先看：
@@ -51,6 +60,14 @@ bgssai.healthcheck.probe.connect-timeout=3s
 bgssai.healthcheck.probe.read-timeout=5s
 bgssai.healthcheck.probe.follow-redirects=false  # 健康检查一般不希望跟随跳转
 bgssai.healthcheck.probe.max-body-bytes=65536    # 读取响应体的上限
+
+bgssai.healthcheck.detail.enabled=true           # 是否保留每次探测的原始请求与应答
+bgssai.healthcheck.detail.max-body-chars=16384   # 单条明细保留的最大字符数
+bgssai.healthcheck.detail.keep-last-failure=true # 额外保留最近一次失败的明细
+
+bgssai.healthcheck.redis.memory-warn-percent=90      # Redis 内存占 maxmemory 达此比例判降级
+bgssai.healthcheck.mysql.connection-warn-percent=90  # MySQL 连接数占 max_connections 达此比例判降级
+bgssai.healthcheck.mysql.query-timeout-seconds=3     # MySQL 单条校验语句的超时
 
 # 用户中心 / 核心服务（name 与 group 是中文，故写 \uXXXX）
 bgssai.healthcheck.applications[0].name=\u7528\u6237\u4e2d\u5fc3
@@ -82,23 +99,66 @@ bgssai.healthcheck.applications[3].url=http://gray.internal:8080/bgssai/health/r
 bgssai.healthcheck.applications[3].enabled=false
 ```
 
-### 单个应用支持的字段
+### 单个目标支持的字段
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `id` | 由 `name` 推导 | 唯一标识，用在接口路径里；纯中文名会回退成 `app-N` |
-| `name` | 必填 | 应用名称 |
+| `name` | 必填 | 目标名称 |
 | `group` | `未分组` | 看板上的分组 |
-| `url` | 必填 | 健康检查接口地址，必须是 http/https 绝对地址 |
-| `method` | `GET` | 只支持 `GET` / `HEAD` |
+| `url` | 必填 | 目标地址，scheme 决定用哪个探针（见下表） |
+| `type` | 由 scheme 推导 | 目标种类，只有 `elasticsearch` 必须显式写 |
+| `method` | `GET` | 只支持 `GET` / `HEAD`，且只对 HTTP 系目标生效 |
 | `enabled` | `true` | 关闭后保留配置但不巡检 |
-| `critical` | `false` | 见下方「关键应用」 |
+| `critical` | `false` | 见下方「关键目标」 |
 | `tags` | 空 | 展示用标签，同时参与页面搜索 |
-| `headers` | 空 | 附加请求头 |
-| `username` / `password` | 空 | HTTP Basic 认证 |
-| `connect-timeout` / `read-timeout` | 取 `probe` 的值 | 单个应用的超时覆盖 |
-| `expected-statuses` | 空（即任意 2xx） | 判定为调用成功的状态码 |
+| `headers` | 空 | 附加请求头（HTTP 系） |
+| `username` / `password` | 空 | HTTP Basic 认证；Redis 用作 `AUTH` 参数，MySQL 用作 JDBC 登录账号 |
+| `connect-timeout` / `read-timeout` | 取 `probe` 的值 | 单个目标的超时覆盖 |
+| `expected-statuses` | 空（即任意 2xx） | 判定为调用成功的状态码（HTTP 系） |
+| `expected-databases` | 空 | 期望存在的库名，只对 MySQL 生效 |
 | `description` | 空 | 备注，展示在卡片上 |
+| `skip-tls-verification` | 取 `probe` 的值 | 见「跳过证书校验」 |
+
+`url` 的 scheme 决定用哪个探针，端口留空时按类型补默认值：
+
+| scheme | 类型 | 默认端口 | 探测方式 |
+| --- | --- | --- | --- |
+| `http` / `https` | `http` | 80 / 443 | 调健康接口，按响应体状态字段或状态码判定 |
+| `http` / `https` 且 `type=elasticsearch` | `elasticsearch` | 9200 | 调 `_cluster/health`，按集群颜色判定 |
+| `redis` / `rediss` | `redis` | 6379 | RESP 协议发 `AUTH` / `SELECT` / `PING` / `INFO` |
+| `mysql` | `mysql` | 3306 | JDBC 建连接跑 `SELECT 1` 并核对库清单 |
+| `tcp` | `tcp` | 必须写明 | 只验证端口可连通 |
+
+Elasticsearch 的 scheme 与普通 HTTP 接口相同，无法自动区分，所以**必须显式写 `type=elasticsearch`**；
+写了之后 url 可以省略路径，探针会自动补 `/_cluster/health`。
+
+```properties
+# MySQL：不写库名就只验证实例，expected-databases 负责核对库是否还在
+bgssai.healthcheck.applications[19].id=mysql-cn
+bgssai.healthcheck.applications[19].url=mysql://121.36.230.185:3306/
+bgssai.healthcheck.applications[19].username=root
+bgssai.healthcheck.applications[19].password=change-me
+bgssai.healthcheck.applications[19].expected-databases[0]=bgssai_blog
+bgssai.healthcheck.applications[19].expected-databases[1]=bgssai_vpn
+
+# Redis：password 就是 AUTH 的参数
+bgssai.healthcheck.applications[20].id=redis-cn
+bgssai.healthcheck.applications[20].url=redis://121.37.158.8:6379
+bgssai.healthcheck.applications[20].password=change-me
+
+# Elasticsearch：Basic 认证 + 自签证书
+bgssai.healthcheck.applications[21].id=elasticsearch-cn
+bgssai.healthcheck.applications[21].url=https://123.60.84.99:9200/_cluster/health
+bgssai.healthcheck.applications[21].type=elasticsearch
+bgssai.healthcheck.applications[21].username=elastic
+bgssai.healthcheck.applications[21].password=change-me
+bgssai.healthcheck.applications[21].skip-tls-verification=true
+```
+
+配置在启动时就会被解析并校验：地址非法、类型与 scheme 对不上、TCP 没写端口、
+`expected-databases` 配到了非 MySQL 目标上，都会直接让应用起不来——这些错误如果留到巡检时才暴露，
+在看板上跟「对端真的挂了」长得一模一样。
 
 ## 状态是怎么判定的
 
@@ -125,29 +185,54 @@ bgssai.healthcheck.applications[3].enabled=false
 Actuator 的 `{"components": {"db": {...}}}`（键即组件名），以及 BGSSAI 的 `"components": [{"name": "db", ...}]`
 （组件名在元素的 `name` 字段里）。
 
+Elasticsearch 的集群颜色一并归到同一套状态里：`green` 是正常，`yellow`（主分片就绪、副本未分配）是降级，
+`red` 是异常。这三个词不与任何产品的自报状态冲突，所以直接并入状态映射，不需要为它单写一套解析。
+
+中间件与数据库没有「自报状态」可读，判定规则写在各自的探针里：
+
+| 目标 | 判 UP | 判 DEGRADED | 判 DOWN |
+| --- | --- | --- | --- |
+| Redis | `PING` 返回 `+PONG` 且 `INFO` 各项正常 | 内存占 `maxmemory` 超阈值 / 从节点链路断开 / RDB 或 AOF 写失败 | 连不上、超时、`AUTH` 被拒 |
+| MySQL | `SELECT 1` 通过 | 连接数占 `max_connections` 超阈值 / 实例只读 / `expected-databases` 有库缺失 | 连不上、超时、认证失败、`SELECT 1` 失败 |
+| Elasticsearch | 集群颜色 `green` | 颜色 `yellow`，或有未分配分片 | 颜色 `red`、连不上、超时 |
+| TCP | 端口能建立连接 | 不判降级 | 连不上、超时 |
+
+MySQL 的辅助查询（版本、连接数、库清单）失败时**不会**把整体判成 DOWN——巡检账号权限不足是常见情况，
+只要 `SELECT 1` 过了就说明库是活的，那几个组件记成「未知」即可，不该用巡检账号的权限去误报一台健康的库。
+
 ### 巡检 BGSSAI 产品线应用
 
 9 个产品 × 管理端 / 用户端共 18 个后端，巡检地址统一为 `/bgssai/health/readiness`（Standards §13.7）。
-巡检目标已按真实地址列全并启用，四份配置文件**各写一份完整的 19 条**（`[0]` 平台自身 + `[1]`..`[18]`）：
+巡检目标已按真实地址列全并启用，四份配置文件各写一份完整清单：
 
-| 文件 | 生效条件 | 巡检目标 |
-|---|---|---|
-| `src/main/resources/application.properties` | 不指定 profile（默认档） | 生产（华为云-境内-上海一 + 腾讯云） |
-| `src/main/resources/application-prod.properties` | `SPRING_PROFILES_ACTIVE=prod` | 同上，与主配置逐条一致 |
-| `src/main/resources/application-dev.properties` | `SPRING_PROFILES_ACTIVE=dev` | 开发（华为云-境外-墨西哥二 + 腾讯云） |
-| `src/main/resources/application-local.properties` | `SPRING_PROFILES_ACTIVE=local` | 同 dev，笔记本本机启动用 |
+| 文件 | 生效条件 | 巡检目标 | 条数 |
+|---|---|---|---|
+| `src/main/resources/application.properties` | 不指定 profile（默认档） | 生产（华为云-境内-上海一 + 腾讯云） | 25 |
+| `src/main/resources/application-prod.properties` | `SPRING_PROFILES_ACTIVE=prod` | 同上，与主配置逐条一致 | 25 |
+| `src/main/resources/application-dev.properties` | `SPRING_PROFILES_ACTIVE=dev` | 开发（华为云-境外-墨西哥二 + 腾讯云） | 22 |
+| `src/main/resources/application-local.properties` | `SPRING_PROFILES_ACTIVE=local` | 同 dev，笔记本本机启动用 | 22 |
 
-**主配置自带整份基线，因此 `java -jar app.jar` 不带 profile 也能看到 19 个应用**，看板不再显示
-「还没有配置被监控的应用」；Jenkins 部署仍注入 `--spring.profiles.active=<env>`，命中哪一档就整份
+清单分两段：前 19 条是 `[0]` 平台自身 + `[1]`..`[18]` 十八个后端，四份文件完全相同；后面是中间件与
+数据库——生产两地各一套（`mysql-cn` / `mysql-global` / `redis-cn` / `redis-global` /
+`elasticsearch-cn` / `elasticsearch-global`），开发只有境外一套（`mysql-dev` / `redis-dev` /
+`elasticsearch-dev`），所以 prod 家族与 dev 家族的条数本就不同。
+
+**主配置自带整份基线，因此 `java -jar app.jar` 不带 profile 也能看到 25 个目标**，看板不再显示
+「还没有配置被监控的目标」；Jenkins 部署仍注入 `--spring.profiles.active=<env>`，命中哪一档就整份
 换成那一档的地址。
 
 **为什么四份文件各写一遍，而不是主配置写公共部分、profile 只写差异**：Spring Boot 绑定集合时
 **不跨 property source 合并**，只从优先级最高的那个源整份取。profile 文件优先级高于主配置，一旦
 它出现 `applications` 键，主配置那份就整份失效；此时 profile 文件若只写 `[1..18]`、指望 `[0]` 从
-主配置补上，绑定器会在下标 0 处遇到空洞并抛「left unbound」启动失败。代价是同一批应用在四个文件
+主配置补上，绑定器会在下标 0 处遇到空洞并抛「left unbound」启动失败。代价是同一批目标在四个文件
 里各有一份，改一处忘一处既没有编译期报错也没有启动期报错，只会在切换 profile 后悄悄探测到过时的
 地址——所以由 `ConfigurationFilesConsistencyTests` 守护：主配置与 prod 档、local 档与 dev 档必须
-逐条一致，四份文件的应用清单与顺序必须相同，任一条对不上 `./mvnw test`（部署构建同样会跑）直接失败。
+逐条一致，四份文件的前 19 条与顺序必须相同，每份都必须覆盖到数据库、Redis 与 Elasticsearch，
+凭据与证书开关也要配齐，任一条对不上 `./mvnw test`（部署构建同样会跑）直接失败。
+
+注意 `detail.*` / `redis.*` / `mysql.*` 这些阈值是**标量键**，Spring Boot 跨 property source 是逐键
+合并的，不像 `applications` 那样整份取代，所以只在主配置写一份即可，profile 文件不复制——多一份就多
+一处会漂移的地方，这一点同样有用例守着。
 
 三个决定 URL 长相的事实，改地址前务必知道：
 
@@ -159,7 +244,8 @@ Actuator 的 `{"components": {"db": {...}}}`（键即组件名），以及 BGSSA
    这 14 条换成私网地址**（每条的私网地址都写在它上方的注释里）；GEO 海外与腾讯云 SaaS 这 4 条，以及
    整份 dev 档（境外 `192.168.0.x`），只能走公网。
 3. **`skip-tls-verification=true`**。证书签给的是业务域名（`www.bgssai-blog.com` 等），而这里按机器 IP
-   直连，TLS 握手会因主机名不匹配失败，健康的应用会被整片误判为 DOWN。见下一节。
+   直连，TLS 握手会因主机名不匹配失败，健康的应用会被整片误判为 DOWN。三台 Elasticsearch 同理——
+   它们用的是自签证书（`curl` 需要 `-k`）。见下一节。
 
 ### 跳过证书校验：为什么开、以及怎么关掉它
 
@@ -185,6 +271,66 @@ Actuator 的 `{"components": {"db": {...}}}`（键即组件名），以及 BGSSA
 这 18 条一律 **`critical: false`**——本平台自己的 `/actuator/health` 只该反映「平台还能不能巡检」，
 不该因为某个下游应用挂了就对外报 DOWN，否则编排系统会去重启这个本来正常的平台。
 
+## 中间件与数据库为什么要单独直连探
+
+18 个产品后端的巡检地址是就绪探针 `/bgssai/health/readiness`，而按 Standards §13.2，
+**就绪探针只由 critical 组件决定结论**，critical 只有 `db` 与 `mybatis`；Redis、Elasticsearch
+这类依赖一律非 critical，既不参与判定、**也不在就绪端点被检查**。换句话说 Redis 挂了，
+应用的就绪探针照样返回 `UP`，看板上一片绿。
+
+Standards §13.4 又禁止健康负载回显连接串、主机、端口与数据库版本，所以即使去查全量报告
+`/bgssai/health`，也拿不到中间件本身的水位（内存占用、连接数、集群颜色）。
+
+因此中间件与数据库的可用性只能由本平台自己连过去看。四份配置文件里各带一套：
+生产两地各一套（境内 / 境外的 MySQL、Redis、Elasticsearch 共 6 条），开发只有境外一套（3 条）。
+
+`expected-databases` 值得单独说一句：`bgssai-database` 仓的 clean 流水线会 `DROP DATABASE`，
+库被清掉时 3306 端口照样开着，应用要到下一次访问才报错。把期望的库名列出来，探针每轮都去
+`information_schema` 对一遍，库没了当轮就能看见。
+
+**口令为什么直接写在配置文件里**：Standards §1 全局禁用配置占位符，环境差异一律在 profile 文件里
+写死最终字面量，这是产品线的既定口径；这些口令的权威出处是 `bgssai-logs` 仓的 `inventory/infra.md`。
+看板、REST 接口与 `/api/report.md` 都不会回显它们——探针在写入原始明细之前就已统一脱敏
+（`Authorization` 头、Redis 的 `AUTH` 参数、JDBC 口令一律替换成占位符）。
+
+## 原始明细：看得到对端到底说了什么
+
+归一化后的状态只回答「是不是好的」，排障要的却是「对端究竟返回了什么」。所以每次探测都会留下一份
+`ProbeDetail`：发出去的请求（含请求头）、应答首行、响应头、以及**原样未加工的响应正文**。
+卡片上的「查看详情」按钮会拉 `/fragments/apps/{id}/detail` 打开弹窗，JSON 会缩进后展示，
+非 JSON 原样输出。
+
+两个刻意的取舍：
+
+- **明细里存的是原文，美化只发生在展示时**。对端返回的是压缩成一行还是本来就带缩进，
+  偶尔正是线索；一旦在采集时就格式化，「原始响应」四个字就名不副实了。
+- **额外保留最近一次失败的明细**（`detail.keep-last-failure`）。目标恢复之后，最近一次结果就变成
+  一次成功的探测，那时想知道刚才究竟错在哪里，只能靠这份留档。目标当前就在失败状态时不重复展示。
+
+明细按目标常驻内存，所以 `detail.max-body-chars` 给了上限。注意它只影响**保留**多少，
+不影响**读取**多少——判定状态用的始终是完整响应体（读取上限由 `probe.max-body-bytes` 控制）。
+截断过的正文会在页面和报告里明确标注。
+
+## 可下载的 Markdown 报告
+
+`GET /api/report.md` 返回一份完整的 Markdown 报告，用来交给 AI 分析、或者存档比对。
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `download` | `true` | `false` 时改为 `inline`，在浏览器里直接打开 |
+| `raw` | `true` | `false` 时不含原始应答，报告体积小一个数量级 |
+| `refresh` | `false` | `true` 时先跑一轮巡检再生成 |
+
+报告固定八个章节：报告元信息、状态汇总、需要处理的目标、全部目标一览、逐目标明细、
+当前巡检配置、口径说明、可以让 AI 回答的问题。
+
+后两节是专门为「让 AI 优化当前的健康检查」写的。只给一堆状态值，AI 只能泛泛地说「建议加强监控」；
+把判定规则、阈值、目标清单、以及 Standards §13 里那几条决定了当前设计的约束一并写进去，
+它才可能指出「这条目标的读超时对跨境链路偏紧」「这台实例的内存阈值该按实际水位调」这类有依据的结论。
+最后一节直接列出十来个可以照着问的问题，问题里的数字取自本次巡检的真实数据。
+
+报告里不会出现任何口令：目标清单只列到账号层面，明细里的凭据在探针写入前已经脱敏。
+
 ## REST 接口
 
 | 方法 | 路径 | 说明 |
@@ -195,6 +341,8 @@ Actuator 的 `{"components": {"db": {...}}}`（键即组件名），以及 BGSSA
 | `GET` | `/api/dashboard` | 汇总 + 按分组归拢，看板一次拉取用 |
 | `POST` | `/api/refresh` | 立刻巡检全部应用 |
 | `POST` | `/api/apps/{id}/refresh` | 立刻巡检单个应用 |
+| `GET` | `/api/report.md` | 可下载的 Markdown 巡检报告 |
+| `GET` | `/fragments/apps/{id}/detail` | 详情弹窗的 HTML 片段（看板内部使用） |
 
 查询不存在的 id 返回 `404` 和 RFC 9457 的 `application/problem+json`。
 
@@ -204,9 +352,9 @@ $ curl -s localhost:8080/api/summary
  "generatedAt":"2026-07-31T06:12:03.117Z","lastCheckedAt":"2026-07-31T06:12:01.882Z","uiRefreshSeconds":10}
 ```
 
-## 关键应用与平台自身的健康端点
+## 关键目标与平台自身的健康端点
 
-被监控应用的汇总会并入平台自己的 `/actuator/health`，作为 `monitoredApplications` 贡献者：
+被监控目标的汇总会并入平台自己的 `/actuator/health`，作为 `monitoredApplications` 贡献者：
 
 ```json
 {
@@ -217,11 +365,11 @@ $ curl -s localhost:8080/api/summary
 }
 ```
 
-**只有标记 `critical: true` 的应用确认异常（DOWN / DEGRADED）时，平台才会对外报 DOWN。**
+**只有标记 `critical: true` 的目标确认异常（DOWN / DEGRADED）时，平台才会对外报 DOWN。**
 巡检平台自身是否可用，和被监控方是否可用是两件事——不能因为随便一个下游挂了，就让编排系统去重启这个平台。
 「尚未巡检」的 UNKNOWN 也不算异常，否则平台刚启动、首轮巡检还没跑完时就会对外报 DOWN。
 
-> ⚠️ 如果要把本平台自己的 `/actuator/health` 也配成被监控应用，**不要标成 `critical: true`**。
+> 注意：如果要把本平台自己的 `/actuator/health` 也配成被监控应用，**不要标成 `critical: true`**。
 > 该端点包含 `monitoredApplications` 贡献者，一旦报过一次 DOWN 就会被自己记下来，从此再也回不到 UP。
 
 ## 看板
@@ -229,21 +377,39 @@ $ curl -s localhost:8080/api/summary
 页面用 Thymeleaf 服务端渲染，JavaScript 只做三件事：定时拉取 `/fragments/dashboard` 片段替换 DOM、
 客户端搜索与状态筛选、深浅色主题切换。视图逻辑只有服务端这一份，不需要在前端再写一遍。
 
-- 顶部汇总：整体状态、应用总数、各状态计数
-- 按分组展示卡片：状态灯、响应耗时、HTTP 状态码、可用率、最近检查时间
+- 顶部汇总：整体状态、目标总数、各状态计数
+- 按分组展示卡片：类型标签、状态灯、响应耗时、HTTP 状态码、可用率、最近检查时间
 - 每张卡片带一条历史趋势条（最近 N 次巡检结果），鼠标悬停可看单次明细
-- 子组件（`db`、`diskSpace` 等）可展开查看
-- 支持按名称 / 分组 / 地址 / 标签搜索，按状态筛选
+- 子组件（`db`、`memory`、`shards` 等）可展开查看
+- 「查看详情」打开弹窗，展示完整统计、子组件明细、**原始请求与应答**、最近一次失败现场与全部历史采样
+- 支持按名称 / 分组 / 地址 / 标签 / 类型搜索，按状态与类型两个维度筛选
 - 「立刻巡检」按钮触发一轮全量巡检；每张卡片也可单独重新检查
+- 「下载报告」「预览报告」直通 `/api/report.md`
 - 自动跟随系统深浅色，也可手动切换
+
+详情弹窗的内容同样由服务端渲染（`templates/detail.html`），前端只负责把片段塞进 `<dialog>`。
+原始应答里可能有任何字符，交给 Thymeleaf 转义比在 JavaScript 里手工拼 DOM 安全得多——
+模板里一律用 `th:text`，没有一处 `th:utext`。定时刷新不会关掉已打开的弹窗，弹窗内容也不自动刷新，
+免得排障时看的现场在眼前被换掉。
 
 ## 实现要点
 
 - 巡检使用 **虚拟线程**（Java 21）并发执行，用信号量限制同时在途的探测数
 - 同一时刻只允许一轮全量巡检，重复触发会被合并
 - 巡检结果只保存在进程内存里，不做持久化——重启后重新巡检即可恢复
-- 每个被监控应用有独立的 `RestClient`，超时、请求头、认证按应用配置隔离
+- 每个被监控目标有独立的 `RestClient`，超时、请求头、认证按目标配置隔离
 - 配置在启动时解析并校验：非法地址、不支持的请求方法会直接让应用启动失败，而不是等到巡检时才暴露
+- 每种目标类型对应一个 `HealthProbe` 实现，由 `HealthProbeDispatcher` 按类型分派。
+  新增一种被监控目标就是新增一个 `@Component`，别处不做 if-else 分发；装配期会检查
+  「配置里用到的类型都有探针」，漏装一个组件在启动时就失败
+- Redis 探针手写 RESP，不引 Jedis / Lettuce：为一次 `PING` 拉进连接池与 Netty 不划算，
+  而且客户端会把应答解析成对象，反而拿不到要留进明细的原文
+- MySQL 探针的 JDBC 调用跑在一个专用的小线程池上并带硬截止时间。
+  调用线程是虚拟线程，而 JDK 21 上 Connector/J 内部大量 `synchronized` 会**钉住载体线程**，
+  一台库不可达时会连累同一轮里其它目标的探测；挪到平台线程上，慢的代价就只由这一条目标承担
+- 只引 `com.mysql:mysql-connector-j`（`runtime` 作用域），不引 `spring-boot-starter-jdbc`。
+  少了 `spring-jdbc`，`DataSourceAutoConfiguration` 的条件不成立，Spring Boot 不会为本平台
+  自动装配任何数据源，驱动只是探针手里的一个工具
 
 ## 开发
 
@@ -253,11 +419,16 @@ $ curl -s localhost:8080/api/summary
 ```
 
 测试用 JDK 自带的 `HttpServer` 模拟被监控应用（见 `StubHealthServer`），覆盖 200/503/204、
-非 JSON 响应、404、连接被拒、读超时等场景，不依赖外部网络。
+非 JSON 响应、404、连接被拒、读超时、Elasticsearch 集群颜色等场景，不依赖外部网络。
+
+Redis 探针对着 `StubRedisServer` 跑——那是一个真的说 RESP 协议的假 Redis，因此覆盖的是完整链路
+（编码请求、解析应答、解析 `INFO`、判定降级、口令脱敏），不是对着 mock 断言。
+MySQL 没有可用的真实实例，覆盖的是不依赖对端的部分：JDBC 地址拼装与连不上时的失败路径。
 
 `ConfigurationFilesConsistencyTests` 只读四份 `.properties`、不发任何网络请求（也不会启动上下文去
-连生产地址），断言四件事：主配置自带整份 19 条基线、主配置与 prod 档逐条一致、local 档与 dev 档逐条
-一致、按真实 ConfigData 加载顺序装配环境后各档覆盖语义符合预期（prod 得到基线地址、dev 得到开发地址）。
+连生产地址），断言六件事：主配置自带整份基线、主配置与 prod 档逐条一致、local 档与 dev 档逐条一致、
+每份文件的下标连续且能被 `ApplicationRegistry` 真正解析出来、每份都覆盖了数据库与中间件且凭据与证书
+开关配齐、按真实 ConfigData 加载顺序装配环境后各档覆盖语义符合预期（prod 得到基线地址、dev 得到开发地址）。
 改巡检目标时它是唯一会拦住「只改了一个文件」的关卡。
 
 ## 部署
@@ -271,24 +442,35 @@ user/admin；目标机 `123.60.68.201`（dev/prod 同机）。细节见 [`deploy
 src/main/java/com/bgssai/healthcheck/
 ├── HealthCheckApplication.java
 ├── config/HealthCheckProperties.java        # 全部配置项
-├── domain/                                  # 状态枚举与对外数据结构
+├── domain/                                  # 状态枚举、目标类型与对外数据结构
+│   ├── TargetType.java                      # HTTP / ELASTICSEARCH / REDIS / MYSQL / TCP
+│   ├── ProbeDetail.java                     # 原始请求与应答
+│   └── ...
 ├── service/
 │   ├── ApplicationRegistry.java             # 配置解析与校验
-│   ├── HttpHealthProbe.java                 # 单次探测与响应归一化
-│   ├── HealthStatusStore.java               # 内存中的结果、历史与统计
+│   ├── HealthProbe.java                     # 探针接口，每种目标类型一个实现
+│   ├── HealthProbeDispatcher.java           # 按类型分派 + 统一裁剪明细
+│   ├── HttpHealthProbe.java                 # HTTP 与 Elasticsearch
+│   ├── RedisHealthProbe.java                # RESP：AUTH / SELECT / PING / INFO
+│   ├── MysqlHealthProbe.java                # JDBC：SELECT 1 + 库清单核对
+│   ├── TcpHealthProbe.java                  # 只验证端口可连通
+│   ├── ProbeSecrets.java                    # 明细里的凭据脱敏
+│   ├── HealthStatusStore.java               # 内存中的结果、最近一次失败、历史与统计
 │   ├── HealthCheckService.java              # 并发编排与查询视图
+│   ├── HealthReportService.java             # Markdown 报告渲染
 │   ├── HealthCheckScheduler.java            # 定时触发
 │   └── MonitoredApplicationsHealthIndicator.java
 └── web/
     ├── HealthApiController.java             # REST 接口
+    ├── HealthReportController.java          # GET /api/report.md
     ├── DashboardController.java             # 看板页面与片段
     └── ViewFormatter.java                   # 页面格式化
 
 src/main/resources/
-├── application.properties          # 巡检行为阈值 + 基线 19 个巡检目标（= 生产，不指定 profile 时生效）
-├── application-prod.properties     # 生产 19 个巡检目标（与主配置逐条一致）
-├── application-dev.properties      # 开发 19 个巡检目标
+├── application.properties          # 巡检行为阈值 + 基线 25 个巡检目标（= 生产，不指定 profile 时生效）
+├── application-prod.properties     # 生产 25 个巡检目标（与主配置逐条一致）
+├── application-dev.properties      # 开发 22 个巡检目标
 ├── application-local.properties    # 本机启动，目标同 dev
-├── templates/index.html
+├── templates/{index.html, detail.html}
 └── static/{css/app.css, js/app.js, favicon.svg}
 ```

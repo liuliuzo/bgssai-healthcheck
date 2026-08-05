@@ -60,6 +60,18 @@
             <optional>true</optional>
         </dependency>
 
+        <!--
+            MySQL 驱动：只被 MysqlHealthProbe 用来建一条连接跑校验语句。
+            这里刻意不引 spring-boot-starter-jdbc / 任何 ORM —— 少了 spring-jdbc，
+            DataSourceAutoConfiguration 的 @ConditionalOnClass 不成立，Spring Boot
+            不会为本平台自动装配任何数据源，驱动只是探针手里的一个工具。
+        -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

@@ -42,7 +42,7 @@ DIAG_LOG_LINES="${DIAG_LOG_LINES:-80}"
 # 依赖短暂不可用（network-online 抢跑、数据库刚起）仍能自行恢复。
 START_LIMIT_INTERVAL_SECONDS="${START_LIMIT_INTERVAL_SECONDS:-1800}"
 START_LIMIT_BURST="${START_LIMIT_BURST:-10}"
-# 启动档：由部署流水线按目标环境注入（dev/test/prod，与 GitHub Environment 同名）。
+# 启动档：由部署流水线按目标环境注入（dev/test/prod，与 Jenkins Job 名前缀一致）。
 # 缺省 dev。三档配置（数据源 / JWT / MQTT / SSL 等）一律写死在各 application-<profile>.properties
 # 里随 jar 打包，服务器上不需要放任何配置文件、不需要建本机库——application-secrets.properties
 # 注入机制已停用（见各产品仓 deploy/README.md）。

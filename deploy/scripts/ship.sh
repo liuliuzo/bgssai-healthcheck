@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 运行位置：GitHub Actions runner（非目标服务器）。
+# 运行位置：Jenkins 控制器 / agent（非目标服务器）。
 # 职责：用 sshpass 将新 jar 与远程部署脚本推送到目标服务器，并触发远程部署。
-# 所有主机 / 账号 / 密码均来自环境变量（由工作流从 GitHub Secrets 注入），本脚本不含任何明文凭据。
+# 所有主机 / 账号 / 密码均来自环境变量（由流水线从 Jenkins 凭据注入），本脚本不含任何明文凭据。
 #
 # 必需环境变量：
 #   SSHPASS       SSH 登录密码（sshpass -e 从此变量读取，不进入命令行历史/进程参数）

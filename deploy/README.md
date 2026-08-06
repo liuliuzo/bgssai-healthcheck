@@ -25,6 +25,8 @@
 主机清单键（Jenkins 凭据 `bgssai-<env>-hosts`）：`HEALTHCHECK_HOST` 及可选
 `HEALTHCHECK_PORT` / `_HEALTH_SCHEME` / `_HEALTH_PATH`（缺省已在中央仓模板写好）。
 
+> 上传通道：目标机装了 rsync 时走 `rsync --inplace --partial` 增量续传（只传两次构建之间变化的字节，重试从断点继续），没装则自动回落到 scp 全量传输。跨境端点强烈建议预装 rsync（`apt-get install -y rsync`，yum 系 `yum install -y rsync`）——与 JDK 一样属目标机基线环境，部署过程只检测不安装、不改动目标机软件包。单次尝试按「文件大小 / 吞吐下限」限时，单个文件全部尝试合计另有总预算，超出即失败并保持远端不变；详见中央仓 `jenkins/README.md` 的「跨境上传」一节。
+
 服务不存在时由 `remote-deploy.sh` 自动创建并 enable，无需手工装单元。参考单元见
 `deploy/systemd/bgssai-healthcheck.service`（可选加固用）。
 

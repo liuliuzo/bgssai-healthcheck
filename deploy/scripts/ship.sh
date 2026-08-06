@@ -23,6 +23,13 @@
 #                    设 0 关闭该守护（不推荐，仅供确属慢速链路时的应急放行）。
 #   UPLOAD_MIN_TIMEOUT_SECONDS
 #                    上传墙钟上限的下界（秒），默认 120。避免小文件被推导出过短的上限。
+#   NET_MAX_ATTEMPTS 「远端尚未被改动」的网络准备步骤（建目录 + 两次上传）的最大尝试次数，默认 3。
+#                    设 1 关闭重试。真正触发部署的那一步永不重试，理由见 retry_transient 注释。
+#   NET_RETRY_DELAY_SECONDS
+#                    两次尝试之间的等待秒数，默认 15。
+#   NET_RETRY_BUDGET_SECONDS
+#                    单个端点花在重试上的累计墙钟预算（秒），默认 900；超预算即放弃，
+#                    避免链路整体劣化时把 Job 的总时长预算耗光（见 UPLOAD_MIN_KIBPS 注释里的事故）。
 set -euo pipefail
 
 JAR_LOCAL="${1:?usage: ship.sh <local-jar-path>}"
@@ -61,6 +68,27 @@ if ! [[ "${UPLOAD_MIN_KIBPS}" =~ ^[0-9]+$ ]]; then
 fi
 if ! [[ "${UPLOAD_MIN_TIMEOUT_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
   echo "[ship] UPLOAD_MIN_TIMEOUT_SECONDS 必须是正整数（当前 ${UPLOAD_MIN_TIMEOUT_SECONDS}）" >&2
+  exit 1
+fi
+
+# 跨境链路重试：19 个目标端点分布在华为云境外、腾讯云与境内，实测单次上传吞吐集中在
+# 500 KiB/s ~ 1.2 MiB/s，只有下限的 2 ~ 5 倍。这条链路上「连上后突然静默」「建连超时」
+# 「吞吐塌到下限以下」都是分钟级的随机事件 —— 一轮全量部署要连续做 19 次几十到上百 MB 的
+# 传输，撞上一次几乎是必然。此前任何一次都会让该端点在本轮里彻底出局，而失败点全部落在
+# 远端尚未被改动的准备阶段，重来一次即可，没有任何副作用。
+NET_MAX_ATTEMPTS="${NET_MAX_ATTEMPTS:-3}"
+NET_RETRY_DELAY_SECONDS="${NET_RETRY_DELAY_SECONDS:-15}"
+NET_RETRY_BUDGET_SECONDS="${NET_RETRY_BUDGET_SECONDS:-900}"
+if ! [[ "${NET_MAX_ATTEMPTS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[ship] NET_MAX_ATTEMPTS 必须是正整数（当前 ${NET_MAX_ATTEMPTS}）" >&2
+  exit 1
+fi
+if ! [[ "${NET_RETRY_DELAY_SECONDS}" =~ ^[0-9]+$ ]]; then
+  echo "[ship] NET_RETRY_DELAY_SECONDS 必须是非负整数（当前 ${NET_RETRY_DELAY_SECONDS}）" >&2
+  exit 1
+fi
+if ! [[ "${NET_RETRY_BUDGET_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[ship] NET_RETRY_BUDGET_SECONDS 必须是正整数（当前 ${NET_RETRY_BUDGET_SECONDS}）" >&2
   exit 1
 fi
 
@@ -176,15 +204,52 @@ upload() {
   return "${rc}"
 }
 
+# retry_transient <步骤说明> <命令...>
+#
+# 只包住「远端尚未被改动」的三个准备步骤：建目录、传 jar、传 remote-deploy.sh。三步都幂等 ——
+# mkdir -p 可重复执行；两次 scp 的落点是暂存文件 app.jar.incoming 与尚未被调用的
+# remote-deploy.sh，重传只是覆盖一份还没有生效的文件，目标服务全程在跑上一版本。
+# 失败在这三步时，远端状态与本次部署开始前完全一致，重来一次没有任何副作用。
+#
+# 刻意**不**包住后面的 run remote deploy：那一步会停服务、换 jar、重启、等健康检查，
+# 自动重试它就是「自动重新部署」，与仓库约定（部署失败不自动重部署，由人工用单产品 Job 重跑）
+# 直接冲突。远端一旦开始变更，失败即上报，由 remote-deploy.sh 自己的回滚兜底。
+retry_transient() {
+  local what="$1"
+  shift
+  local attempt=1 rc=0 loop_started="${SECONDS}" spent=0
+  while :; do
+    rc=0
+    "$@" || rc=$?
+    if (( rc == 0 )); then
+      return 0
+    fi
+    spent=$(( SECONDS - loop_started ))
+    if (( attempt >= NET_MAX_ATTEMPTS )); then
+      echo "[ship] (${APP_NAME}) ERROR: ${what} 连续 ${attempt} 次失败（累计 ${spent}s），放弃本端点。" >&2
+      break
+    fi
+    if (( spent >= NET_RETRY_BUDGET_SECONDS )); then
+      echo "[ship] (${APP_NAME}) ERROR: ${what} 已尝试 ${attempt} 次、累计 ${spent}s，超出重试预算 ${NET_RETRY_BUDGET_SECONDS}s，放弃本端点。" >&2
+      break
+    fi
+    echo "[ship] (${APP_NAME}) WARNING: ${what} 第 ${attempt}/${NET_MAX_ATTEMPTS} 次失败（退出码 ${rc}，累计 ${spent}s），${NET_RETRY_DELAY_SECONDS}s 后重试" >&2
+    sleep "${NET_RETRY_DELAY_SECONDS}"
+    attempt=$(( attempt + 1 ))
+  done
+  echo "[ship] (${APP_NAME}) 远端未被改动：jar 未替换、服务未重启，仍在跑上一版本。" >&2
+  return "${rc}"
+}
+
 # 远端目录做 shell 安全转义（printf %q），避免路径含空格 / 引号时被远端 shell 误解析。
 q_app_dir="$(printf '%q' "${APP_DIR}")"
 
 echo "[ship] (${APP_NAME}) ensure remote dir ${APP_DIR}"
-remote "mkdir -p ${q_app_dir}"
+retry_transient '建远端目录' remote "mkdir -p ${q_app_dir}"
 
-upload "${JAR_LOCAL}" "${APP_DIR}/app.jar.incoming" jar
+retry_transient '上传 jar' upload "${JAR_LOCAL}" "${APP_DIR}/app.jar.incoming" jar
 
-upload "${REMOTE_DEPLOY_SRC}" "${APP_DIR}/remote-deploy.sh" remote-deploy.sh
+retry_transient '上传 remote-deploy.sh' upload "${REMOTE_DEPLOY_SRC}" "${APP_DIR}/remote-deploy.sh" remote-deploy.sh
 
 # 逐值转义每个环境变量后再拼进远端命令，任意值含空格 / 引号都不会破坏解析或注入。
 remote_cmd="$(printf 'APP_NAME=%q APP_DIR=%q SERVICE_NAME=%q APP_PORT=%q HEALTH_PATH=%q HEALTH_SCHEME=%q RESTART_CMD=%q HEALTH_TIMEOUT_SECONDS=%q APP_PROFILE=%q BUILD_ID=%q bash %q' \

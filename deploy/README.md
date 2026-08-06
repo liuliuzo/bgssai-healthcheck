@@ -7,7 +7,6 @@
 | 通道 | 状态 | 入口 |
 | --- | --- | --- |
 | **Jenkins** | 主用 | `bgssai` 文件夹 → `bgssai-healthcheck deploy(dev\|prod)` / `stop(dev\|prod)` → Build |
-| GitHub Actions | 未接入 | — |
 
 **环境由 Job 名决定**：名字末尾 `(dev)` / `(prod)`。点 Build 即执行，无参数。
 

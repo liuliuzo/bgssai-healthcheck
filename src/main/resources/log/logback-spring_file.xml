@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<configuration>
+    <springProperty scope="context" name="application.name" source="spring.application.name" />
+    <springProperty scope="context" name="log.path" source="logging.applog.path" />
+    <springProperty scope="context" name="applog.level" source="logging.applog.level" />
+
+    <!-- third party logs default as WARN level and print to unstructured log file-->
+    <springProperty scope="context" name="com.alibaba.level" source="logback.com.alibaba.level" />
+    <springProperty scope="context" name="org.apache.level" source="logback.org.apache.level" />
+    <springProperty scope="context" name="org.springframework.level" source="logback.org.springframework.level" />
+    <springProperty scope="context" name="com.fasterxml.level" source="logback.com.fasterxml.level" />
+    <springProperty scope="context" name="org.hibernate.level" source="logback.org.hibernate.level" />
+    <springProperty scope="context" name="org.jboss.level" source="logback.org.jboss.level" />
+    <springProperty scope="context" name="org.eclipse.level" source="logback.org.eclipse.level" />
+    <springProperty scope="context" name="com.googlecode.level" source="logback.com.googlecode.level" />
+    <springProperty scope="context" name="io.netty.level" source="logback.io.netty.level" />
+    <springProperty scope="context" name="com.google.level" source="logback.com.google.level" />
+    <springProperty scope="context" name="com.union.level" source="logback.com.union.level" />
+    <springProperty scope="context" name="com.github.level" source="logback.com.github.level" />
+    <springProperty scope="context" name="rocketmq.client.level" source="logback.rocketmq.client.level" />
+    <springProperty scope="context" name="org.mybatis.level" source="logback.org.mybatis.level" />
+    <springProperty scope="context" name="org.ehcache.level" source="logback.org.ehcache.level" />
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{reqId:-}] [%X{uid:-}] %logger{100} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!--native slf4j log for unstructured log for monitoring, loghead:logTime|level|thread|msg -->
+    <appender name="unstructured" class="ch.qos.logback.core.rolling.RollingFileAppender" >
+        <file>${log.path}/${application.name}_unstrct.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{reqId:-}] [%X{uid:-}] %logger{100} - %msg%n</pattern>
+        </encoder>
+        <!-- 按天 + 单文件 500MB 滚动；保留 30 天、总量上限 128GB。
+             SizeAndTimeBasedRollingPolicy 为 SizeAndTimeBasedFNATP（logback 1.1.7 起废弃、启动打 WARN）
+             的官方替代，已内建按大小触发能力，滚动语义等价。 -->
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${log.path}/${application.name}_unstrct.%d{yyyy-MM-dd}.%i.zip</fileNamePattern>
+            <maxFileSize>500MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>128GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="unstructured" />
+        <appender-ref ref="STDOUT"/>
+    </root>
+</configuration>

@@ -431,10 +431,54 @@ MySQL 没有可用的真实实例，覆盖的是不依赖对端的部分：JDBC 
 开关配齐、按真实 ConfigData 加载顺序装配环境后各档覆盖语义符合预期（prod 得到基线地址、dev 得到开发地址）。
 改巡检目标时它是唯一会拦住「只改了一个文件」的关卡。
 
+`LoggingConfigurationTests` 同样只读 classpath 上的资源、不启动上下文、不写任何日志文件，
+断言五件事：dev / local / prod 三档都把 `logging.config` 指向落文件的 logback 配置且落在
+`/opt/bgssai/log`、test 档留在控制台、滚动文件名由 `spring.application.name` 拼出且与
+`bgssai-logs` 仓 inventory 登记的一致、两份 logback 配置的 pattern 逐字一致且带 `traceId`、
+stdout 档的 `<logger>` 指向本仓包名。改日志配置时它是拦住「配置文件改了但没人读」的关卡。
+
+## 日志
+
+与产品线其余 9 个仓（18 个后端）同一套口径，没有本平台专属的写法：
+
+| 档 | `logging.config` | 落点 |
+| --- | --- | --- |
+| `dev` / `local` / `prod` | `log/logback-spring_file.xml` | `/opt/bgssai/log/bgssai-healthcheck_unstrct.log` + 控制台 |
+| `test` | `log/logback-spring_stdout.xml` | 只有控制台 |
+
+滚动策略与其它仓一致：按天 + 单文件 500MB，保留 30 天、总量上限 128GB，归档为 `.zip`。
+
+**`logging.config` 这一行是整套日志的总开关**。`src/main/resources/log/` 下那两份 logback 配置，
+只有在某档 `.properties` 写了 `logging.config` 指向它时才会被读；漏掉那一行不会有任何编译期或
+启动期报错——应用照常起来、控制台照常有日志，只是文件里空空如也，
+[`bgssai-logs`](https://github.com/liuliuzo/bgssai-logs) 那边采集到的永远是一个不存在的路径。
+`LoggingConfigurationTests` 就是把这种静默失效变成构建失败的关卡，同时钉住文件名、pattern 与
+`<logger>` 的包名。
+
+日志文件名由 `spring.application.name` 拼出（`<应用名>_unstrct.log`），与 `logging.applog.path`
+一起构成 `bgssai-logs` 仓 `inventory/<env>.tsv` 里本端那行登记的采集路径——**改这三处任意一个，
+都要同步改那边**，否则 Collect logs 会拉到空。
+
+每行日志带 `traceId`（`RequestTraceFilter` 在请求入口注入 MDC，Standards §6.1.7），业务代码
+不得再手工把 traceId 拼进日志文案。本平台无登录、无租户，因此不带其它仓的 `userId` /
+`companyCode` 两个 MDC 位。要注意本平台的日志有两类来源，只有前一类有 traceId：
+
+- **请求线程**（看板页、`/api/**`、`/actuator/**`）——每行都带 traceId，可按 traceId 把一次
+  页面刷新涉及的日志串起来；traceId 同时回写到响应头 `X-Trace-Id`，截到一次异常凭响应头即可
+  定位日志行，不必按时间戳翻。
+- **后台巡检线程**（`HealthCheckScheduler` 定时轮与探针的并发子任务）——不经过任何请求，
+  MDC 为空，该位渲染为空串。这是有意为之：巡检日志本就按目标 id 检索，给巡检线程编一个假
+  traceId 只会让「有 traceId 就代表有对应请求」这个排障前提失真。
+
 ## 部署
 
 Jenkins 主通道：`bgssai-healthcheck deploy(dev|prod)` / `stop(dev|prod)`。单实例、无
 user/admin；目标机 `123.60.68.201`（dev/prod 同机）。细节见 [`deploy/README.md`](deploy/README.md)。
+
+日志采集与清理走 [`bgssai-logs`](https://github.com/liuliuzo/bgssai-logs) 的
+Collect logs / Clear logs / Check app status 三条同名 Job，本端在该仓
+`inventory/dev.tsv` 与 `inventory/prod.tsv` 里登记为 `healthcheck`（两档同机 `123.60.68.201`，
+`8080` / `http`）。
 
 ## 项目结构
 
@@ -460,6 +504,7 @@ src/main/java/com/bgssai/healthcheck/
 │   ├── HealthReportService.java             # Markdown 报告渲染
 │   ├── HealthCheckScheduler.java            # 定时触发
 │   └── MonitoredApplicationsHealthIndicator.java
+├── filter/RequestTraceFilter.java           # traceId 注入 MDC（Standards §6.1.7）
 └── web/
     ├── HealthApiController.java             # REST 接口
     ├── HealthReportController.java          # GET /api/report.md
@@ -471,6 +516,8 @@ src/main/resources/
 ├── application-prod.properties     # 生产 25 个巡检目标（与主配置逐条一致）
 ├── application-dev.properties      # 开发 22 个巡检目标
 ├── application-local.properties    # 本机启动，目标同 dev
+├── log/logback-spring_file.xml     # dev / local / prod：落 /opt/bgssai/log + 控制台
+├── log/logback-spring_stdout.xml   # test：只打控制台
 ├── templates/{index.html, detail.html}
 └── static/{css/app.css, js/app.js, favicon.svg}
 ```

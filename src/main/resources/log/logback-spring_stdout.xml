@@ -1,23 +1,31 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
     <!-- stdout log for local test-->
+    <!--
+        pattern 与 logback-spring_file.xml 保持逐字一致：同一条日志切换 profile 前后长相不变，
+        排障时不必先分辨自己在看哪一档。traceId 由 RequestTraceFilter 注入 MDC（Standards §6.1.7），
+        业务代码不得手工拼接。
+
+        本平台无登录、无租户，故不带 userId / companyCode 两个 MDC 位——留着也永远是空括号。
+    -->
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{reqId:-}] [%X{uid:-}] %logger{100} - %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{traceId:-}] %-5level %logger{100} - %msg%n</pattern>
         </encoder>
     </appender>
 
+    <!--
+        java.sql 在本仓不是摆设：MysqlHealthProbe 直接用 JDBC 驱动建连接跑校验语句。
+        其它产品仓这里还配了 org.apache.ibatis / org.mybatis.spring —— 本平台刻意不引
+        spring-boot-starter-jdbc 与任何 ORM（见 pom.xml 注释），classpath 上压根没有 MyBatis，
+        照抄过来只是永远不会命中的死配置，故不保留。
+    -->
     <logger name="java.sql" level="INFO"/>
-    <logger name="org.apache.ibatis" level="INFO"/>
-    <logger name="org.mybatis.spring" level="INFO"/>
 
     <logger name="java.sql.Statement" level="INFO" additivity="false">
         <appender-ref ref="STDOUT"/>
     </logger>
-    <logger name="org.apache.ibatis.logging.jdbc.BaseJdbcLogger" level="INFO" additivity="false">
-        <appender-ref ref="STDOUT"/>
-    </logger>
-    <logger name="com.bgssai.geo.cn" level="INFO" additivity="false">
+    <logger name="com.bgssai.healthcheck" level="INFO" additivity="false">
         <appender-ref ref="STDOUT"/>
     </logger>
     <root level="INFO">

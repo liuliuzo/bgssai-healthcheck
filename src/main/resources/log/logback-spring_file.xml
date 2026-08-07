@@ -21,17 +21,29 @@
     <springProperty scope="context" name="org.mybatis.level" source="logback.org.mybatis.level" />
     <springProperty scope="context" name="org.ehcache.level" source="logback.org.ehcache.level" />
 
+    <!--
+        pattern 与 logback-spring_stdout.xml 保持逐字一致：同一条日志切换 profile 前后长相不变，
+        排障时不必先分辨自己在看哪一档。traceId 由 RequestTraceFilter 注入 MDC（Standards §6.1.7），
+        业务代码不得手工拼接。
+
+        本平台无登录、无租户，故不带 userId / companyCode 两个 MDC 位——留着也永远是空括号。
+    -->
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{reqId:-}] [%X{uid:-}] %logger{100} - %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{traceId:-}] %-5level %logger{100} - %msg%n</pattern>
         </encoder>
     </appender>
 
     <!--native slf4j log for unstructured log for monitoring, loghead:logTime|level|thread|msg -->
+    <!--
+        文件名 ${application.name}_unstrct.log 即 bgssai-healthcheck_unstrct.log，落在
+        ${log.path}（各 profile 里的 logging.applog.path=/opt/bgssai/log）。这两项合起来
+        正是 bgssai-logs 仓 inventory/<env>.tsv 里本端那行登记的采集路径，改名要同步改那边。
+    -->
     <appender name="unstructured" class="ch.qos.logback.core.rolling.RollingFileAppender" >
         <file>${log.path}/${application.name}_unstrct.log</file>
         <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{reqId:-}] [%X{uid:-}] %logger{100} - %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{traceId:-}] %-5level %logger{100} - %msg%n</pattern>
         </encoder>
         <!-- 按天 + 单文件 500MB 滚动；保留 30 天、总量上限 128GB。
              SizeAndTimeBasedRollingPolicy 为 SizeAndTimeBasedFNATP（logback 1.1.7 起废弃、启动打 WARN）

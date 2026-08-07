@@ -13,6 +13,42 @@
 搭建、凭据、Job 清单与排障见
 [`bgssai-workflows/jenkins/README.md`](https://github.com/liuliuzo/bgssai-workflows/blob/develop/jenkins/README.md)。
 
+## 开发环境的部署方式已改为「目标机自建」
+
+dev 与 prod 现在走两条不同的通道：
+
+| | dev | prod |
+| --- | --- | --- |
+| 源码 | **目标机自己** `git fetch` 本仓 `develop` | Jenkins 控制器克隆 |
+| 构建 | **目标机上** `mvn package`（单模块、无前端） | 控制器上 `mvn package` |
+| jar 怎么到位 | 就地产出，落 `app.jar.incoming` | `deploy/scripts/ship.sh` 推到 `app.jar.incoming` |
+| 跨境流量 | 一条 SSH 控制通道（几十 KiB） | 每端点几十到上百 MiB |
+| 之后的步骤 | **完全相同**：`deploy/remote-deploy.sh` 原子替换 → 重启 → 健康检查 → 失败回滚 | 同左 |
+
+**为什么改**：控制器在华为云境外、部分目标机在境内，逐台推 fat jar 是整条部署链上唯一的跨境
+大流量环节，也是 2026-08-07 全量部署失败的直接原因（那一轮 dev 挂掉的两个产品都倒在上传上，
+与代码毫无关系）。改为目标机自建后，跨境只剩一条 SSH 控制通道，拉源码那段流量由目标机直连
+GitHub。**生产不变** —— 生产产物必须来自同一台可控的构建机，否则「线上跑的是哪份编译产物」
+就失去了唯一答案。
+
+对本仓意味着什么：
+
+- 本仓 `Jenkinsfile` 顶部新增 `PRODUCT` 映射，是本产品构建口径的**单一声明**，两条通道共用。
+  dev 下 `Build` 阶段会显示为 skipped —— 这是对的，控制器在那条通道上不构建。
+- `deploy/remote-deploy.sh` 两条通道共用，**逐字节一致的要求因此更硬**：dev 下目标机直接执行
+  自己源码树里的这一份，副本一旦漂移，dev 与 prod 就会跑两套部署逻辑。
+- `deploy/scripts/ship.sh` 只在 prod 通道上跑。下文关于上传吞吐、rsync 与 `_UPLOAD_*` 旋钮的
+  说明只适用于 prod。
+- **dev 目标机需要一套构建工具链**（git + JDK 21 + Maven；本产品无前端，Node 与 pnpm 用不到，但装机脚本会一并装齐），
+  以及放源码与依赖缓存的磁盘（5 GB 起）与 4 GB 内存。部署流水线**只检测不安装**，缺工具即失败
+  并给出指引，远端不会被改动。一次性准备：在目标机上以 root 跑一次中央仓的
+  [`jenkins/install/provision-build-host.sh`](https://github.com/liuliuzo/bgssai-workflows/blob/develop/jenkins/install/provision-build-host.sh)。
+
+完整说明（通道对比、按端点旋钮 `<KEY>_SRC_ROOT` / `_BUILD_TIMEOUT_SECONDS` / `_MIN_FREE_MB` /
+`_MAVEN_OPTS` / `_NODE_OPTIONS`、排障）见中央仓
+[`jenkins/README.md`](https://github.com/liuliuzo/bgssai-workflows/blob/develop/jenkins/README.md)
+的「开发环境：目标机自建」一节。
+
 ## 目标映射
 
 | 项 | 值 |

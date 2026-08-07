@@ -26,13 +26,24 @@
 #   UPLOAD_MAX_TIMEOUT_SECONDS
 #                    上传墙钟上限的上界（秒），默认 450。大 jar 在慢链路上也不会一次占满重试预算，
 #                    留出第二次尝试的机会（rsync 通道下重试从断点继续，不从零重来）。
+#                    注意它会**抬高实际生效的吞吐下限**：撞上这个上界之后，真正决定成败的不再是
+#                    UPLOAD_MIN_KIBPS，而是「文件大小 / 本上界」。146 MiB 的 jar 在 450s 上界下
+#                    需要 332 KiB/s 才传得完，是声明下限 64 的 5 倍。超时报错会把这件事说清楚。
 #   NET_MAX_ATTEMPTS 「远端尚未被改动」的网络准备步骤（建目录 + 两次上传）的最大尝试次数，默认 3。
 #                    设 1 关闭重试。真正触发部署的那一步永不重试，理由见 retry_transient 注释。
+#                    这是**上限而非承诺**：单次开销为 min(上限, 文件大小/吞吐下限)，撞上
+#                    UPLOAD_MAX_TIMEOUT_SECONDS 的大 jar 往往在跑满次数前先被
+#                    NET_RETRY_BUDGET_SECONDS 截断（小 jar 单次限时短，跑得满）。
+#                    被预算截断时日志会明说原因，不会让人误以为漏跑了一次。见下方「三者自洽」。
 #   NET_RETRY_DELAY_SECONDS
 #                    两次尝试之间的等待秒数，默认 15。
 #   NET_RETRY_BUDGET_SECONDS
-#                    单个端点花在重试上的累计墙钟预算（秒），默认 900；超预算即放弃，
+#                    单个端点花在重试上的累计墙钟预算（秒），默认 915；超预算即放弃，
 #                    避免链路整体劣化时把 Job 的总时长预算耗光（见 UPLOAD_MIN_KIBPS 注释里的事故）。
+#                    本预算是硬权威：它保护的是 Job 的总时长，因此当它与 NET_MAX_ATTEMPTS ×
+#                    UPLOAD_MAX_TIMEOUT_SECONDS 冲突时，让步的是次数，不是预算。想让跑满上限的
+#                    大 jar 也有 3 次完整尝试，就显式设到 3×450+2×15=1380，并自行确认 Job 扛得住。
+#                    改动它时必须与 UPLOAD_MAX_TIMEOUT_SECONDS 一起核算，见 deploy/tests/。
 set -euo pipefail
 
 JAR_LOCAL="${1:?usage: ship.sh <local-jar-path>}"
@@ -100,7 +111,9 @@ fi
 # 远端尚未被改动的准备阶段，重来一次即可，没有任何副作用。
 NET_MAX_ATTEMPTS="${NET_MAX_ATTEMPTS:-3}"
 NET_RETRY_DELAY_SECONDS="${NET_RETRY_DELAY_SECONDS:-15}"
-NET_RETRY_BUDGET_SECONDS="${NET_RETRY_BUDGET_SECONDS:-900}"
+# 915 = 2×450 + 15：正好供得起两次完整的 450s 尝试外加一次退避。旧值 900 差这 15 秒，
+# 于是第二次尝试总在临近结束时把预算刚好花超，见下方「三者自洽」一段的事故记录。
+NET_RETRY_BUDGET_SECONDS="${NET_RETRY_BUDGET_SECONDS:-915}"
 if ! [[ "${NET_MAX_ATTEMPTS}" =~ ^[1-9][0-9]*$ ]]; then
   echo "[ship] NET_MAX_ATTEMPTS 必须是正整数（当前 ${NET_MAX_ATTEMPTS}）" >&2
   exit 1
@@ -113,6 +126,59 @@ if ! [[ "${NET_RETRY_BUDGET_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
   echo "[ship] NET_RETRY_BUDGET_SECONDS 必须是正整数（当前 ${NET_RETRY_BUDGET_SECONDS}）" >&2
   exit 1
 fi
+# ---- 三者自洽：预算必须真正供得起声明的尝试次数 ----
+#
+# 2026-08-07 的 dev/prod-all-deploy 暴露了这三个常量互相矛盾的后果。当时 NET_MAX_ATTEMPTS=3、
+# UPLOAD_MAX_TIMEOUT_SECONDS=450、NET_RETRY_BUDGET_SECONDS=900，而跑满 3 次需要
+# 3×450 + 2×15 = 1380s。于是：
+#
+#   - prod 15 个失败端点里有 14 个报的是「已尝试 2 次…超出重试预算」——第 3 次从未发生，
+#     日志里却一路打印着「第 1/3 次」「第 2/3 次」，声明的策略与执行的策略对不上。
+#   - 唯一真的进到第 3 次的是 healthcheck（jar 小，单次上限 430s < 450s，两次只花 876s）：
+#     它只分到 900-876 = 9 秒。rsync 当时已断点续传到 94%、瞬时 6.01 MB/s，就差临门一脚，
+#     却被这 9 秒的墙钟必然判超时，还顺带打了一条「实测吞吐低于下限」的假报告。
+#
+# 修法：**预算是硬权威**——它保护的是 Job 的总时长（见 UPLOAD_MIN_KIBPS 注释里那次
+# 4 小时耗尽、8 个未部署产品一并 ABORTED 的事故），不能为了凑次数而抬高到 1380。
+#
+# 但也**不能反过来把 NET_MAX_ATTEMPTS 一刀砍到 2**：单次尝试的真实开销是
+# min(上限, 文件大小/吞吐下限)，只有大到撞上 450s 上限的 jar 才吃满 450s。10 MiB 的 jar
+# 单次只要 160s，三次连退避才 510s，预算绰绰有余 —— 按上限去砍次数，等于把小 jar 在抖动
+# 链路上那次真正有用的重试也一起砍掉，而「撞上一次几乎是必然」正是这套重试存在的理由。
+#
+# 所以自洽靠两条，而不是靠预先削次数：
+#   1. 预算调到 915 = 2×450 + 15，让「跑满上限的大 jar」至少有两次完整尝试。
+#      旧值 900 差这 15 秒，第二次总在临近结束时把预算刚好花超（prod 14 个端点都卡在这里）。
+#   2. 预算见底时不再起一次注定跑不完的尝试（见 retry_transient 里的门槛），并在日志里
+#      把「是预算停的、不是链路慢」说清楚。
+# 次数上限保持声明值：小 jar 跑得满就跑满，大 jar 由预算自然截断，两边都不说假话。
+#
+# retry_attempts_funded 只用于把这层关系讲给读日志的人听（见下方预算见底时的提示），
+# 不用来改写 NET_MAX_ATTEMPTS。供得起 n 次的条件：n×上限 + (n-1)×退避 ≤ 预算。
+retry_attempts_funded() {
+  local budget="$1" cap="$2" delay="$3" n=0
+  while (( (n + 1) * cap + n * delay <= budget )); do
+    n=$(( n + 1 ))
+  done
+  if (( n < 1 )); then
+    n=1
+  fi
+  printf '%s' "${n}"
+}
+
+NET_ATTEMPTS_FUNDED_AT_CAP="$(retry_attempts_funded \
+  "${NET_RETRY_BUDGET_SECONDS}" "${UPLOAD_MAX_TIMEOUT_SECONDS}" "${NET_RETRY_DELAY_SECONDS}")"
+
+# 供测试与排障：只解析并打印生效的重试策略，不做任何网络动作即退出。
+# 放在这里是刻意的 —— 上面全部是纯计算，下面才开始碰文件与 SSH。
+if [[ -n "${SHIP_PRINT_POLICY:-}" ]]; then
+  echo "attempts=${NET_MAX_ATTEMPTS} funded_at_cap=${NET_ATTEMPTS_FUNDED_AT_CAP}" \
+       "budget=${NET_RETRY_BUDGET_SECONDS}s cap=${UPLOAD_MAX_TIMEOUT_SECONDS}s" \
+       "floor_min=${UPLOAD_MIN_TIMEOUT_SECONDS}s min_kibps=${UPLOAD_MIN_KIBPS}" \
+       "delay=${NET_RETRY_DELAY_SECONDS}s"
+  exit 0
+fi
+
 # retry_transient 每次尝试前把「本端点还剩多少重试预算」写进这里，upload 据此收紧自己的墙钟上限。
 # 不这样做的话，预算只在一次尝试**结束后**才被检查，最后一次尝试可以整段超出预算 —— 对
 # 116 MiB 这种大 jar 就是多拖 450 秒。初值取满预算，供不经 retry_transient 的直接调用使用。
@@ -225,19 +291,41 @@ transfer_once() {
 # 传输被 kill 时最该知道的是「到底走了多少字节」—— 只说「低于下限 N」没法回答「那该调到多少」。
 # rsync 的进度用 \r 原地刷新，落到文件里是一长行，取最后一条即可；scp 没有可解析的进度，
 # 改用远端文件大小反推（只在失败路径上多开这一次 SSH，成功路径不付这个代价）。
+#
+# 顺带把「实测吞吐」与「远端已落盘字节数」留在两个全局里，供 upload 判定这次超时到底
+# 该不该赖链路 —— 2026-08-07 的 prod 里有 4 个端点实测 119 ~ 284 KiB/s（远高于 64 的下限）、
+# 其中两个连整份 jar 都已落盘，却统统被报成「实测吞吐低于下限 64 KiB/s」。
+# 未能测出时置 -1，表示「无数据」，与「测得 0 KiB/s」区分开。
+LAST_TRANSFER_RATE_KIBPS=-1
+LAST_TRANSFER_LANDED_BYTES=-1
 report_transfer_progress() {
   local log_file="$1" dest="$2" elapsed="$3" last="" landed="" rate=""
+  LAST_TRANSFER_RATE_KIBPS=-1
+  LAST_TRANSFER_LANDED_BYTES=-1
   if [[ "${TRANSPORT}" == "rsync" ]]; then
     [[ -s "${log_file}" ]] || return 0
     last="$(tr '\r' '\n' < "${log_file}" | grep -E '[0-9]+%' | tail -n 1 | sed 's/^ *//;s/  */ /g' || true)"
     if [[ -n "${last}" ]]; then
       echo "[ship] (${APP_NAME}) 中断前进度: ${last}"
+      # rsync 的进度行形如「25,426,993  90%  25.07kB/s  0:01:49」。第一个数字是**文件内已完成
+      # 到的位置**（含千分位逗号），不是本次尝试实际过线的字节数 —— 断点续传时它把上一次已经
+      # 传好的那一段也算了进去。因此这里只把它当「完成度」用（判断是否已整份落盘），
+      # **不**拿它除以耗时去反推吞吐：healthcheck 那次续传第三次 9 秒内位置从 90% 走到 94%，
+      # 这么一除会得出 2877 KiB/s 的假吞吐，正是本次要消灭的那类误导。
+      # 行内 rsync 自报的瞬时速率同理不可信（它衡量的是刚补的那几个块），照原样打出来即可。
+      # 真吞吐只在 scp 通道下取 —— scp 每次都从零重传，远端文件大小就是本次实际过线的量。
+      landed="$(printf '%s' "${last}" | awk '{gsub(/,/, "", $1); print $1}')"
+      if [[ "${landed}" =~ ^[0-9]+$ ]] && (( landed > 0 )); then
+        LAST_TRANSFER_LANDED_BYTES="${landed}"
+      fi
     fi
     return 0
   fi
   landed="$(remote "stat -c %s $(printf '%q' "${dest}") 2>/dev/null || echo 0" 2>/dev/null || echo '')"
   if [[ "${landed}" =~ ^[0-9]+$ ]] && (( landed > 0 )) && (( elapsed > 0 )); then
     rate=$(( landed / elapsed / 1024 ))
+    LAST_TRANSFER_LANDED_BYTES="${landed}"
+    LAST_TRANSFER_RATE_KIBPS="${rate}"
     echo "[ship] (${APP_NAME}) 中断前进度: 远端已落盘 $(human_size "${landed}")，${elapsed}s，实测约 ${rate} KiB/s"
   fi
 }
@@ -260,19 +348,26 @@ upload() {
   bytes="$(wc -c < "${src}")"
   echo "[ship] (${APP_NAME}) upload ${what} -> ${dest} ($(human_size "${bytes}")，transport=${TRANSPORT})"
 
+  # limit 由三个来源之一决定，超时报错必须按真正生效的那一个说话 —— 一律说成
+  # 「吞吐低于下限」会把排查引向链路，而实际原因可能是这里的上界或预算。
+  local limit_reason="throughput" derived=0
   limit=0
   if [[ "${HAVE_TIMEOUT}" == "true" ]] && (( UPLOAD_MIN_KIBPS > 0 )); then
-    limit=$(( bytes / (UPLOAD_MIN_KIBPS * 1024) + 1 ))
+    derived=$(( bytes / (UPLOAD_MIN_KIBPS * 1024) + 1 ))
+    limit="${derived}"
     # 用 if 而非 `(( ... )) && limit=...`：条件为假时 `(( ))` 返回 1，在 set -e 下会直接终止脚本。
     if (( limit < UPLOAD_MIN_TIMEOUT_SECONDS )); then
       limit="${UPLOAD_MIN_TIMEOUT_SECONDS}"
+      limit_reason="floor"
     fi
     if (( limit > UPLOAD_MAX_TIMEOUT_SECONDS )); then
       limit="${UPLOAD_MAX_TIMEOUT_SECONDS}"
+      limit_reason="cap"
     fi
     # 再收一道：本次尝试不许超出该端点剩余的重试预算，否则预算只能事后发现已经花超了。
     if (( RETRY_BUDGET_REMAINING > 0 )) && (( limit > RETRY_BUDGET_REMAINING )); then
       limit="${RETRY_BUDGET_REMAINING}"
+      limit_reason="budget"
     fi
   fi
 
@@ -292,15 +387,68 @@ upload() {
 
   # 124 = timeout 发出 TERM 后超时；137 = TERM 无效、由 --kill-after 补的 KILL。
   if (( rc == 124 || rc == 137 )); then
-    echo "[ship] (${APP_NAME}) ERROR: 上传超时：$(human_size "${bytes}") 在 ${limit}s 内未传完，实测吞吐低于下限 ${UPLOAD_MIN_KIBPS} KiB/s。" >&2
+    # 按真正决定 limit 的那一项说话。effective 是本次限时下「传得完」所需的真实吞吐，
+    # 它才是判定的那条线；只有 limit 由吞吐下限直接推导时，它才等于 UPLOAD_MIN_KIBPS。
+    # limit 为 0（没有 timeout 可用）时根本走不到本分支，仍兜一下底：set -e 下的除零会
+    # 直接终止脚本，把真正的失败原因盖掉。
+    local effective=0
+    if (( limit > 0 )); then
+      effective=$(( bytes / limit / 1024 ))
+    fi
+    case "${limit_reason}" in
+      cap)
+        echo "[ship] (${APP_NAME}) ERROR: 上传超时：$(human_size "${bytes}") 在 ${limit}s 内未传完。" >&2
+        echo "[ship] (${APP_NAME}) 限时来自 UPLOAD_MAX_TIMEOUT_SECONDS=${UPLOAD_MAX_TIMEOUT_SECONDS}s 封顶（按 ${UPLOAD_MIN_KIBPS} KiB/s 下限本应给 ${derived}s）。" >&2
+        echo "[ship] (${APP_NAME}) 即：本次实际生效的吞吐门槛是 ${effective} KiB/s，而非声明的 ${UPLOAD_MIN_KIBPS} KiB/s —— jar 越大这条线越高。" >&2
+        ;;
+      budget)
+        echo "[ship] (${APP_NAME}) ERROR: 上传超时：$(human_size "${bytes}") 在 ${limit}s 内未传完。" >&2
+        echo "[ship] (${APP_NAME}) 限时来自本端点剩余的重试预算（仅剩 ${limit}s），不是吞吐下限；本次实际门槛 ${effective} KiB/s。" >&2
+        ;;
+      floor)
+        echo "[ship] (${APP_NAME}) ERROR: 上传超时：$(human_size "${bytes}") 在 ${limit}s 内未传完（限时取下界 UPLOAD_MIN_TIMEOUT_SECONDS=${UPLOAD_MIN_TIMEOUT_SECONDS}s）。" >&2
+        ;;
+      *)
+        echo "[ship] (${APP_NAME}) ERROR: 上传超时：$(human_size "${bytes}") 在 ${limit}s 内未传完，实测吞吐低于下限 ${UPLOAD_MIN_KIBPS} KiB/s。" >&2
+        ;;
+    esac
     report_transfer_progress "${log_file}" "${dest}" "${elapsed}"
-    echo "[ship] (${APP_NAME}) 目标 ${SSH_USER}@${SSH_HOST}:${SSH_PORT}。这是链路问题，不是构建问题。" >&2
+    # 把「这次到底赖不赖链路」讲死，不让读日志的人自己去对两个数字。
+    # link_at_fault 决定后面几行的措辞：守护自己把一次达标的传输判死时，再喊「链路问题」
+    # 只会把人支到 mtr/ping 上白查一轮 —— 2026-08-07 的 prod 正是这样。
+    local link_at_fault=true
+    if (( LAST_TRANSFER_LANDED_BYTES >= bytes )); then
+      link_at_fault=false
+      echo "[ship] (${APP_NAME}) 注意：远端已落盘 $(human_size "${LAST_TRANSFER_LANDED_BYTES}")，与本地 jar 等大 —— 传输实际上已经传完，是墙钟上限先到而被中止，并非链路不达标。" >&2
+    elif (( LAST_TRANSFER_RATE_KIBPS >= 0 )) && (( LAST_TRANSFER_RATE_KIBPS >= UPLOAD_MIN_KIBPS )); then
+      link_at_fault=false
+      echo "[ship] (${APP_NAME}) 注意：实测约 ${LAST_TRANSFER_RATE_KIBPS} KiB/s，高于声明下限 ${UPLOAD_MIN_KIBPS} KiB/s —— 本次不是链路慢于下限，而是 ${limit}s 的限时不足以传完 $(human_size "${bytes}")。" >&2
+    fi
+    if [[ "${link_at_fault}" == "true" ]]; then
+      echo "[ship] (${APP_NAME}) 目标 ${SSH_USER}@${SSH_HOST}:${SSH_PORT}。这是链路问题，不是构建问题。" >&2
+    else
+      echo "[ship] (${APP_NAME}) 目标 ${SSH_USER}@${SSH_HOST}:${SSH_PORT}。这是守护参数问题，既不是链路也不是构建。" >&2
+    fi
     echo "[ship] (${APP_NAME}) 远端未被改动：jar 未替换、服务未重启，仍在跑上一版本（只会留下一个未传完的 ${dest}）。" >&2
     if [[ "${TRANSPORT}" == "rsync" ]]; then
       echo "[ship] (${APP_NAME}) 已传部分保留在远端：本轮重试与之后人工重跑单产品 Job 都从断点继续，不从零重来。" >&2
     fi
-    echo "[ship] (${APP_NAME}) 定位：从本机 scp 一个 10 MB 测试文件到该主机计时，并用 mtr/ping 看 RTT 与丢包。" >&2
-    echo "[ship] (${APP_NAME}) 确属慢速链路时，可在主机清单为该端点设 <KEY>_UPLOAD_MIN_KIBPS 放宽下限（设 0 关闭守护）。" >&2
+    # 对策必须对着真正生效的那条线给。limit 由上界/预算封顶时，调 UPLOAD_MIN_KIBPS 一点用都没有：
+    # 它已经不是判定依据了，改小只会让人以为放宽了守护，下次照样在同一处失败。
+    if [[ "${link_at_fault}" == "true" ]]; then
+      echo "[ship] (${APP_NAME}) 定位：从本机 scp 一个 10 MB 测试文件到该主机计时，并用 mtr/ping 看 RTT 与丢包。" >&2
+    fi
+    case "${limit_reason}" in
+      cap|budget)
+        echo "[ship] (${APP_NAME}) 对策：本次限时不由 UPLOAD_MIN_KIBPS 决定，调它无效。要放宽请调大 UPLOAD_MAX_TIMEOUT_SECONDS 并同步调大 NET_RETRY_BUDGET_SECONDS（两者需自洽，见脚本头部说明）。" >&2
+        if [[ "${TRANSPORT}" != "rsync" ]]; then
+          echo "[ship] (${APP_NAME}) 更省事的办法：给目标机装 rsync（apt-get install -y rsync / yum install -y rsync），之后只传变化字节、重试也从断点继续。" >&2
+        fi
+        ;;
+      *)
+        echo "[ship] (${APP_NAME}) 确属慢速链路时，可在主机清单为该端点设 <KEY>_UPLOAD_MIN_KIBPS 放宽下限（设 0 关闭守护）。" >&2
+        ;;
+    esac
     return 1
   fi
   echo "[ship] (${APP_NAME}) ERROR: 上传失败（${TRANSPORT} 退出码 ${rc}），耗时 ${elapsed}s" >&2
@@ -319,6 +467,16 @@ upload() {
 # 刻意**不**包住后面的 run remote deploy：那一步会停服务、换 jar、重启、等健康检查，
 # 自动重试它就是「自动重新部署」，与仓库约定（部署失败不自动重部署，由人工用单产品 Job 重跑）
 # 直接冲突。远端一旦开始变更，失败即上报，由 remote-deploy.sh 自己的回滚兜底。
+# 预算把重试截停时，把「为什么没跑满声明的次数」一次说清楚 —— 否则日志里只剩
+# 「第 2/3 次」和「超出预算」两句，读的人会以为少跑了一次、去查是不是脚本有 bug。
+budget_stop_hint() {
+  if (( NET_ATTEMPTS_FUNDED_AT_CAP >= NET_MAX_ATTEMPTS )); then
+    return 0
+  fi
+  echo "[ship] (${APP_NAME}) 说明: 这不是少跑了一次 —— 单次上限 ${UPLOAD_MAX_TIMEOUT_SECONDS}s 时，预算 ${NET_RETRY_BUDGET_SECONDS}s 本就只供得起 ${NET_ATTEMPTS_FUNDED_AT_CAP} 次跑满上限的尝试（声明上限 ${NET_MAX_ATTEMPTS} 次只对单次限时更短的小文件成立）。" >&2
+  echo "[ship] (${APP_NAME}) 说明: 要让大文件也跑满 ${NET_MAX_ATTEMPTS} 次，需把 NET_RETRY_BUDGET_SECONDS 提到 $(( NET_MAX_ATTEMPTS * UPLOAD_MAX_TIMEOUT_SECONDS + (NET_MAX_ATTEMPTS - 1) * NET_RETRY_DELAY_SECONDS ))s，并自行确认 Job 的总时长扛得住。" >&2
+}
+
 retry_transient() {
   local what="$1"
   shift
@@ -327,10 +485,16 @@ retry_transient() {
     # 把剩余预算交给被调用者（upload 用它收紧本次尝试的墙钟上限），
     # 使总耗时真正被 NET_RETRY_BUDGET_SECONDS 封住，而不是只在事后被发现已超。
     RETRY_BUDGET_REMAINING=$(( NET_RETRY_BUDGET_SECONDS - (SECONDS - loop_started) ))
-    # 预算已见底就不再开始下一次尝试。这一段必须在下面的 rc=0 **之前**：break 出去时
+    # 预算见底就不再开始下一次尝试。这一段必须在下面的 rc=0 **之前**：break 出去时
     # rc 要保留上一次尝试的失败码，否则函数会以 0 返回，把一次失败的上传报成成功。
-    if (( attempt > 1 )) && (( RETRY_BUDGET_REMAINING <= 0 )); then
-      echo "[ship] (${APP_NAME}) ERROR: ${what} 已尝试 $(( attempt - 1 )) 次，重试预算 ${NET_RETRY_BUDGET_SECONDS}s 已耗尽，放弃本端点。" >&2
+    #
+    # 门槛取 UPLOAD_MIN_TIMEOUT_SECONDS 而不是 0：剩几秒也去起一次上传，是 2026-08-07 那次
+    # 「第 3 次只分到 9 秒」的成因 —— 那次 rsync 已经续到 94%，却被一个注定跑不完的限时判死，
+    # 还在日志里留下一条「实测吞吐低于下限」的假因。既然预算不足以支撑一次有意义的尝试，
+    # 就照实说预算见底，不要再制造一次必然失败的记录。
+    if (( attempt > 1 )) && (( RETRY_BUDGET_REMAINING < UPLOAD_MIN_TIMEOUT_SECONDS )); then
+      echo "[ship] (${APP_NAME}) ERROR: ${what} 已尝试 $(( attempt - 1 )) 次，重试预算 ${NET_RETRY_BUDGET_SECONDS}s 仅剩 ${RETRY_BUDGET_REMAINING}s，不足一次有意义的尝试（下界 ${UPLOAD_MIN_TIMEOUT_SECONDS}s），放弃本端点。" >&2
+      budget_stop_hint
       break
     fi
     rc=0
@@ -346,9 +510,12 @@ retry_transient() {
     fi
     if (( spent >= NET_RETRY_BUDGET_SECONDS )); then
       echo "[ship] (${APP_NAME}) ERROR: ${what} 已尝试 ${attempt} 次、累计 ${spent}s，超出重试预算 ${NET_RETRY_BUDGET_SECONDS}s，放弃本端点。" >&2
+      budget_stop_hint
       break
     fi
-    echo "[ship] (${APP_NAME}) WARNING: ${what} 第 ${attempt}/${NET_MAX_ATTEMPTS} 次失败（退出码 ${rc}，累计 ${spent}s），${NET_RETRY_DELAY_SECONDS}s 后重试" >&2
+    # 次数后面跟上剩余预算：NET_MAX_ATTEMPTS 是上限而非承诺，大 jar 往往在跑满次数前先被预算截断。
+    # 只写「第 2/3 次」会让人以为还有第三次，2026-08-07 的日志正是这样读起来像少跑了一次。
+    echo "[ship] (${APP_NAME}) WARNING: ${what} 第 ${attempt}/${NET_MAX_ATTEMPTS} 次失败（退出码 ${rc}，累计 ${spent}s，预算剩 $(( NET_RETRY_BUDGET_SECONDS - spent ))s），${NET_RETRY_DELAY_SECONDS}s 后重试" >&2
     sleep "${NET_RETRY_DELAY_SECONDS}"
     attempt=$(( attempt + 1 ))
   done

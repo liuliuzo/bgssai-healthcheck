@@ -20,6 +20,9 @@
 #                           自托管单元固定以 EnvironmentFile=- 引用它（缺失即忽略）。平时不需要
 #                           存在——配置的正常落点是随 jar 打包的 properties，详见 ensure_service
 #                           上方说明。
+#   STAGED_SHA256           待部署 jar 的 sha256（由 ship.sh 在控制器上算出并传入）。非空则在替换
+#                           前校验暂存文件；不匹配即中止，绝不拿一个半截文件去替换正在跑的 jar。
+#                           留空表示控制器无 sha256sum，跳过校验（只告警）。
 set -euo pipefail
 
 APP_NAME="${APP_NAME:?APP_NAME is required}"
@@ -67,6 +70,24 @@ log() { printf '[remote-deploy][%s] %s\n' "${APP_NAME}" "$*"; }
 if [[ ! -f "${STAGED_JAR}" ]]; then
   log "staged jar not found at ${STAGED_JAR}"
   exit 1
+fi
+
+# 暂存文件完整性校验。ship.sh 走 rsync --inplace 断点续传时，暂存文件会被多次尝试反复改写；
+# 一旦「传输已成功」的判断出错，被替换上去的就是一个半新半旧的混合体 —— 那种坏包往往还能启动，
+# 只在运行期以离奇的 NoClassDefFoundError 暴露。这里在**替换之前**卡一道：不匹配即中止，
+# 正在跑的服务与 app.jar 一个字节都不动。
+if [[ -n "${STAGED_SHA256:-}" ]]; then
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual_sha256="$(sha256sum "${STAGED_JAR}" | cut -d' ' -f1)"
+    if [[ "${actual_sha256}" != "${STAGED_SHA256}" ]]; then
+      log "ERROR: 暂存 jar 校验失败：期望 sha256=${STAGED_SHA256}，实际=${actual_sha256}"
+      log "上传未完整落盘（链路中断 / 续传未收敛）。当前 app.jar 与服务未被改动；请重跑本产品部署。"
+      exit 1
+    fi
+    log "staged jar sha256 verified (${STAGED_SHA256})"
+  else
+    log "WARNING: 目标机无 sha256sum，跳过暂存 jar 完整性校验"
+  fi
 fi
 
 mkdir -p "${APP_DIR}/releases"

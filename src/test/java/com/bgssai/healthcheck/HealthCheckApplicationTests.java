@@ -1,5 +1,6 @@
 package com.bgssai.healthcheck;
 
+import com.bgssai.healthcheck.alert.AlertStatus;
 import com.bgssai.healthcheck.domain.AppHealth;
 import com.bgssai.healthcheck.domain.HealthState;
 import com.bgssai.healthcheck.domain.HealthSummary;
@@ -236,6 +237,29 @@ class HealthCheckApplicationTests {
     }
 
     @Test
+    @DisplayName("告警接口只列连续失败达到阈值的目标，正常与停用的都不在其中")
+    void alertsEndpointListsOngoingIncidents() {
+        // 阈值是 2，而 setUp 只保证跑过一轮。这里再补一轮，让持续失败的目标一定越过阈值——
+        // 不能指望「前面的用例已经巡检过很多轮了」，那会让本用例的结果取决于执行顺序。
+        this.healthCheckService.refreshAll();
+
+        AlertStatus status = get("/api/alerts", AlertStatus.class).getBody();
+
+        assertThat(status).isNotNull();
+        assertThat(status.enabled()).isTrue();
+        assertThat(status.failureThreshold()).isEqualTo(2);
+        assertThat(status.channels()).as("没配 webhook 时至少还有日志通道").containsExactly("log");
+        assertThat(status.firing()).extracting(AlertStatus.Firing::applicationName)
+                .contains("异常服务", "连不上的服务", "降级服务")
+                .doesNotContain("正常服务", "已停用的服务");
+        assertThat(status.firing()).allSatisfy(firing -> {
+            assertThat(firing.notifications()).isPositive();
+            assertThat(firing.since()).isNotNull();
+            assertThat(firing.lastNotifiedAt()).isNotNull();
+        });
+    }
+
+    @Test
     @DisplayName("服务层对未知 id 抛出领域异常")
     void serviceRejectsUnknownId() {
         assertThatExceptionOfType(UnknownApplicationException.class)
@@ -392,6 +416,9 @@ class HealthCheckApplicationTests {
                 .contains("## 四、全部目标一览")
                 .contains("## 五、逐目标明细")
                 .contains("## 六、当前巡检配置")
+                // 告警配置与进行中的故障也要进报告，否则 AI 无从判断阈值是否合适
+                .contains("### 告警")
+                .contains("| 连续失败几次才告警 | 2 |")
                 .contains("## 七、口径说明（给 AI 的上下文）")
                 .contains("## 八、可以让 AI 回答的问题")
                 // 逐目标明细里带上了原始应答，AI 才能自己看出对端返回了什么

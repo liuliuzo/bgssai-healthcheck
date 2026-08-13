@@ -1,5 +1,6 @@
 package com.bgssai.healthcheck.service;
 
+import com.bgssai.healthcheck.alert.AlertService;
 import com.bgssai.healthcheck.config.HealthCheckProperties;
 import com.bgssai.healthcheck.config.HealthCheckProperties.Detail;
 import com.bgssai.healthcheck.config.HealthCheckProperties.Mysql;
@@ -44,7 +45,8 @@ class MonitoredApplicationsHealthIndicatorTests {
         this.store = new HealthStatusStore(properties);
         HttpHealthProbe probe = new HttpHealthProbe(RestClient.builder(), JsonMapper.builder().build(), properties);
         HealthProbeDispatcher dispatcher = new HealthProbeDispatcher(List.of(probe), registry, properties);
-        HealthCheckService service = new HealthCheckService(registry, dispatcher, this.store, properties);
+        HealthCheckService service = new HealthCheckService(registry, dispatcher, this.store,
+                AlertService.disabled(), properties);
         this.indicator = new MonitoredApplicationsHealthIndicator(service);
     }
 

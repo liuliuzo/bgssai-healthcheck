@@ -1,5 +1,6 @@
 package com.bgssai.healthcheck.service;
 
+import com.bgssai.healthcheck.alert.AlertService;
 import com.bgssai.healthcheck.config.HealthCheckProperties;
 import com.bgssai.healthcheck.domain.AppHealth;
 import com.bgssai.healthcheck.domain.HealthDashboard;
@@ -40,6 +41,8 @@ public class HealthCheckService {
 
     private final HealthStatusStore store;
 
+    private final AlertService alerts;
+
     private final int uiRefreshSeconds;
 
     /** 虚拟线程：探测几乎全是等待 IO，用平台线程池只会白占内存。 */
@@ -54,10 +57,11 @@ public class HealthCheckService {
     private volatile Instant lastRefreshAt;
 
     public HealthCheckService(ApplicationRegistry registry, HealthProbeDispatcher probe, HealthStatusStore store,
-            HealthCheckProperties properties) {
+            AlertService alerts, HealthCheckProperties properties) {
         this.registry = registry;
         this.probe = probe;
         this.store = store;
+        this.alerts = alerts;
         this.permits = new Semaphore(properties.concurrency());
         this.uiRefreshSeconds = properties.uiRefreshSeconds();
     }
@@ -154,7 +158,9 @@ public class HealthCheckService {
         try {
             this.permits.acquire();
             acquired = true;
-            this.store.record(app.id(), this.probe.probe(app));
+            ProbeResult result = this.probe.probe(app);
+            // 先落库再判告警：看板与告警看到的是同一份结论，不会出现「通知说挂了、页面还是绿的」
+            this.alerts.onProbed(app, result, this.store.record(app.id(), result));
         }
         catch (InterruptedException ex) {
             Thread.currentThread().interrupt();

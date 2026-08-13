@@ -1,5 +1,7 @@
 package com.bgssai.healthcheck.service;
 
+import com.bgssai.healthcheck.alert.AlertService;
+import com.bgssai.healthcheck.alert.AlertStatus;
 import com.bgssai.healthcheck.config.HealthCheckProperties;
 import com.bgssai.healthcheck.domain.AppHealth;
 import com.bgssai.healthcheck.domain.HealthSample;
@@ -51,13 +53,16 @@ public class HealthReportService {
 
     private final HealthCheckProperties properties;
 
+    private final AlertService alertService;
+
     private final ZoneId zone = ZoneId.systemDefault();
 
     public HealthReportService(HealthCheckService healthCheckService, ApplicationRegistry registry,
-            HealthCheckProperties properties) {
+            HealthCheckProperties properties, AlertService alertService) {
         this.healthCheckService = healthCheckService;
         this.registry = registry;
         this.properties = properties;
+        this.alertService = alertService;
     }
 
     /** 建议的下载文件名，带生成时刻，便于多份报告并存比对。 */
@@ -323,6 +328,8 @@ public class HealthReportService {
         row(md, "MySQL 连接数告警阈值", this.properties.mysql().connectionWarnPercent() + "%");
         row(md, "MySQL 查询超时", this.properties.mysql().queryTimeoutSeconds() + " 秒");
 
+        renderAlertConfiguration(md);
+
         md.append("\n### 目标清单\n\n");
         md.append("| id | 类型 | 地址 | 启用 | 关键 | 连接超时 | 读取超时 | 跳过证书校验 | 期望状态码 | 期望数据库 |\n");
         md.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
@@ -343,6 +350,44 @@ public class HealthReportService {
                     .append(" |\n");
         }
         md.append("\n口令不在本报告中出现：目标清单只列到账号层面，明细里的认证信息在探针写入前已替换为占位符。\n\n");
+    }
+
+    /**
+     * 告警配置与进行中的故障。
+     *
+     * <p>与第三节的「当前异常目标」不是一回事，两者的差别本身就是要看的：目标已经红了却不在
+     * 这张表里，说明它还没连续红够 {@code failure-threshold} 次；表里有而第三节没有，说明它刚恢复、
+     * 恢复通知刚发出去。Webhook 地址不进报告——那串 token 等同于一把可以往群里发消息的口令。</p>
+     */
+    private void renderAlertConfiguration(StringBuilder md) {
+        AlertStatus alert = this.alertService.status();
+        md.append("\n### 告警\n\n");
+        md.append("| 参数 | 值 |\n| --- | --- |\n");
+        row(md, "启用", alert.enabled() ? "是" : "否");
+        row(md, "连续失败几次才告警", String.valueOf(alert.failureThreshold()));
+        row(md, "重复提醒间隔", alert.repeatInterval().isZero() ? "不重复（只在状态变化时通知）"
+                : describe(alert.repeatInterval()));
+        row(md, "只对关键目标告警", alert.onlyCritical() ? "是" : "否");
+        row(md, "启用的通道", alert.channels().isEmpty() ? "无——告警产生了也无处可发"
+                : String.join(", ", alert.channels()));
+
+        if (alert.firing().isEmpty()) {
+            md.append("\n当前没有进行中的告警。\n\n");
+            return;
+        }
+        md.append("\n进行中的告警（已通知、尚未恢复）：\n\n");
+        md.append("| 目标 | 分组 | 状态 | 首次异常 | 最近通知 | 已通知次数 |\n");
+        md.append("| --- | --- | --- | --- | --- | --- |\n");
+        for (AlertStatus.Firing firing : alert.firing()) {
+            md.append("| ").append(cell(firing.applicationId()))
+                    .append(" | ").append(cell(firing.group()))
+                    .append(" | ").append(firing.state().getLabel())
+                    .append(" | ").append(timestamp(firing.since()))
+                    .append(" | ").append(timestamp(firing.lastNotifiedAt()))
+                    .append(" | ").append(firing.notifications())
+                    .append(" |\n");
+        }
+        md.append('\n');
     }
 
     /* ---------- 七、口径说明 ---------- */
@@ -423,8 +468,8 @@ public class HealthReportService {
                 + "升级后对平台自身 `/actuator/health` 与编排系统会有什么影响？\n");
         md.append("9. 逐目标明细里的原始应答，有没有哪些字段其实对定位问题没有帮助、可以不再保留？"
                 + "反过来，有没有明显缺失、应该补进明细的信息？\n");
-        md.append("10. 从这份报告能否看出某类故障反复出现？如果要为它加一条自动告警规则，"
-                + "触发条件应该怎么写才不会误报？\n");
+        md.append("10. 从这份报告能否看出某类故障反复出现？对照第六节的告警配置，"
+                + "当前的 failure-threshold 与 repeat-interval 对这类故障是会误报、还是会漏报？给出调整建议。\n");
         md.append("11. 报告本身的结构对你分析是否够用？哪些章节可以合并、哪些需要拆细？\n\n");
     }
 

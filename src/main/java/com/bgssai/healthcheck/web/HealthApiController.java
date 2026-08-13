@@ -1,5 +1,7 @@
 package com.bgssai.healthcheck.web;
 
+import com.bgssai.healthcheck.alert.AlertService;
+import com.bgssai.healthcheck.alert.AlertStatus;
 import com.bgssai.healthcheck.domain.AppHealth;
 import com.bgssai.healthcheck.domain.HealthDashboard;
 import com.bgssai.healthcheck.domain.HealthSummary;
@@ -23,6 +25,7 @@ import java.util.List;
  * GET  /api/dashboard            汇总 + 按分组归拢，看板一次拉取用
  * POST /api/refresh              立刻巡检全部应用
  * POST /api/apps/{id}/refresh    立刻巡检单个应用
+ * GET  /api/alerts               告警配置、启用的通道与进行中的故障
  * </pre>
  */
 @RestController
@@ -31,8 +34,11 @@ public class HealthApiController {
 
     private final HealthCheckService healthCheckService;
 
-    public HealthApiController(HealthCheckService healthCheckService) {
+    private final AlertService alertService;
+
+    public HealthApiController(HealthCheckService healthCheckService, AlertService alertService) {
         this.healthCheckService = healthCheckService;
+        this.alertService = alertService;
     }
 
     @GetMapping("/apps")
@@ -63,5 +69,16 @@ public class HealthApiController {
     @PostMapping("/apps/{id}/refresh")
     public AppHealth refresh(@PathVariable String id) {
         return this.healthCheckService.refresh(id);
+    }
+
+    /**
+     * 告警的当前状况。
+     *
+     * <p>与 {@code /api/apps} 的区别是这里只有「已经通知出去、还没恢复」的那些——
+     * 值班时想知道「有哪些故障是已经喊过人的」，看这个比在整块看板里找红点快。</p>
+     */
+    @GetMapping("/alerts")
+    public AlertStatus alerts() {
+        return this.alertService.status();
     }
 }

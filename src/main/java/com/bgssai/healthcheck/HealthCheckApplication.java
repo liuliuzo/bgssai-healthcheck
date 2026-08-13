@@ -1,5 +1,6 @@
 package com.bgssai.healthcheck;
 
+import com.bgssai.healthcheck.alert.AlertProperties;
 import com.bgssai.healthcheck.config.HealthCheckProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -14,7 +15,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  */
 @SpringBootApplication
 @EnableScheduling
-@EnableConfigurationProperties(HealthCheckProperties.class)
+@EnableConfigurationProperties({ HealthCheckProperties.class, AlertProperties.class })
 public class HealthCheckApplication {
 
     public static void main(String[] args) {

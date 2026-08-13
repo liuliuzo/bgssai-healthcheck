@@ -7,11 +7,13 @@
 - 五类被监控目标：HTTP 健康接口、Elasticsearch、Redis、MySQL、TCP 端口
 - 每次探测都留下**原始请求与应答**，看板上可展开查看，凭据在写入前已脱敏
 - 巡检结果通过 **REST 接口**、**看板页面** 和 **可下载的 Markdown 报告** 三处对外提供
+- 状态由正常转为异常时**主动告警**：日志通道零配置即生效，另可配 Webhook 推到钉钉 / 企业微信 / 飞书
 
 | 地址 | 说明 |
 | --- | --- |
 | `/` | 健康状态看板 |
 | `/api/report.md` | 可下载的 Markdown 巡检报告 |
+| `/api/alerts` | 告警配置与进行中的故障 |
 | `/actuator/health` | 平台自身的健康端点 |
 
 ## 快速开始
@@ -341,6 +343,7 @@ Standards §13.4 又禁止健康负载回显连接串、主机、端口与数据
 | `GET` | `/api/dashboard` | 汇总 + 按分组归拢，看板一次拉取用 |
 | `POST` | `/api/refresh` | 立刻巡检全部应用 |
 | `POST` | `/api/apps/{id}/refresh` | 立刻巡检单个应用 |
+| `GET` | `/api/alerts` | 告警配置、启用的通道与进行中的故障 |
 | `GET` | `/api/report.md` | 可下载的 Markdown 巡检报告 |
 | `GET` | `/fragments/apps/{id}/detail` | 详情弹窗的 HTML 片段（看板内部使用） |
 
@@ -371,6 +374,119 @@ $ curl -s localhost:8080/api/summary
 
 > 注意：如果要把本平台自己的 `/actuator/health` 也配成被监控应用，**不要标成 `critical: true`**。
 > 该端点包含 `monitoredApplications` 贡献者，一旦报过一次 DOWN 就会被自己记下来，从此再也回不到 UP。
+
+## 告警
+
+看板回答「现在怎么样」，告警回答「什么时候变了」。没有告警的巡检平台需要有人一直盯着屏幕，
+而故障往往发生在没人看的时候。
+
+**默认已开启，且不需要任何配置**：日志通道始终生效，告警行落进
+`/opt/bgssai/log/bgssai-healthcheck_unstrct.log` 后由 [`bgssai-logs`](https://github.com/liuliuzo/bgssai-logs)
+采走，等于零配置就有一份可检索、可留存的故障记录，也不会往任何群里发东西。要即时通知再配 Webhook。
+
+### 什么时候会响
+
+告警的输入不是状态本身，而是**状态的变化**。每个目标最多只有一次进行中的故障，从首次探测到异常
+开始、到恢复正常结束，中间无论巡检多少轮，只在这几个时刻发通知：
+
+| 时刻 | 类型 | 说明 |
+| --- | --- | --- |
+| 连续异常次数首次达到 `failure-threshold` | `FIRING` 告警 | 默认第 2 次，见下方「为什么是 2」 |
+| 已在告警中，但异常程度变了（降级转异常，或反过来） | `FIRING` 告警 | 同一次故障，起点不重置 |
+| 距上次通知超过 `repeat-interval` | `REMINDER` 提醒 | 默认 `0s`，即不重复 |
+| 恢复正常 | `RECOVERED` 恢复 | 带上故障持续时长 |
+
+两条刻意的「不响」：
+
+- **没到阈值就恢复的抖动，告警与恢复通知都不发。** 既没告过警，就不该冒出一条「恢复了」——
+  只有下半句的通知比没有通知更让人困惑。
+- **`UNKNOWN` 默认不算异常，也不算恢复。** 它的含义是「对端自报了一个不认识的状态词」，
+  把说不准当故障报会经常误伤；但正在告警的目标转成 `UNKNOWN` 时，也不会被当成已经好了。
+  要把它计入异常就打开 `include-unknown`。
+
+### 为什么阈值是 2、间隔是 0
+
+这两个默认值是本平台的实际处境决定的，改之前先想清楚要换成什么：
+
+- **`failure-threshold=2`**：巡检目标里有跨境链路（境内巡检机探境外机器），偶发一次超时是常态。
+  单次失败就报会把告警变成噪音，而按 30s 的巡检间隔，等第 2 次也只把发现时间推迟半分钟。
+- **`repeat-interval=0s`**：一条修不好的告警每隔几分钟响一次，最后的结果是所有人都不看告警了。
+  想要「长时间未恢复要再提醒」时再打开它，建议不短于半小时。
+
+### 配置
+
+```properties
+bgssai.healthcheck.alert.enabled=true
+# 连续多少次探测为异常才告警
+bgssai.healthcheck.alert.failure-threshold=2
+# 恢复时补一条通知
+bgssai.healthcheck.alert.recovery-notice=true
+# 持续异常时的重复提醒间隔，0 表示只在状态变化时通知一次
+bgssai.healthcheck.alert.repeat-interval=0s
+# UNKNOWN 是否计入异常
+bgssai.healthcheck.alert.include-unknown=false
+# 是否只对 critical=true 的目标告警
+bgssai.healthcheck.alert.only-critical=false
+
+# Webhook 通道：留空即不启用
+bgssai.healthcheck.alert.webhook.url=
+bgssai.healthcheck.alert.webhook.format=generic
+bgssai.healthcheck.alert.webhook.connect-timeout=3s
+bgssai.healthcheck.alert.webhook.read-timeout=5s
+```
+
+`format` 决定报文长什么样。内置三家聊天机器人的格式，是因为只给通用 JSON 的话，
+每个想接机器人的人都得自己再搭一个转换服务：
+
+| `format` | 报文 | 用于 |
+| --- | --- | --- |
+| `generic` | 本平台自己的 JSON，字段最全 | 自研网关、告警聚合系统 |
+| `wecom` | `{"msgtype":"text","text":{"content":…}}` | 企业微信机器人 |
+| `dingtalk` | 同上（钉钉与企业微信报文结构相同） | 钉钉机器人 |
+| `feishu` | `{"msg_type":"text","content":{"text":…}}` | 飞书机器人 |
+
+```properties
+# 钉钉机器人示例
+bgssai.healthcheck.alert.webhook.url=https://oapi.dingtalk.com/robot/send?access_token=xxxx
+bgssai.healthcheck.alert.webhook.format=dingtalk
+# 自研网关要额外的鉴权头时
+bgssai.healthcheck.alert.webhook.headers.X-Gateway-Token=xxxx
+```
+
+> **地址里的 `access_token` 等同于一把「可以往这个群里发任意消息」的口令。**
+> 本平台不会把它写进日志——日志里出现的地址一律抹掉查询串与用户信息（`…/robot/send?***`），
+> 报告与 `/api/alerts` 里也不回显地址本身。
+
+### 通道与失败处理
+
+告警的发送跑在一条专用线程上，不占巡检的并发额度——若在巡检线程里同步等一次 Webhook 往返，
+一个响应慢的机器人就会拖住整轮巡检，「监控平台因为发告警而漏了下一轮探测」是最难堪的一种失效。
+队列有界（256 条），满了就丢并记一条 ERROR：告警积压说明对端已经堵了很久，这时把内存堆满
+比丢几条通知更糟。
+
+单个通道发送失败**只影响它自己**：Webhook 挂了不会让日志通道跟着哑掉，也绝不会向上冒到巡检里。
+Webhook 通道还会检查应答的业务错误码——钉钉 / 企业微信 / 飞书在报文被拒时（关键词不匹配、加签
+错误、机器人被停用）一律返回 `200` 加一个非零的 `errcode`，只看 HTTP 状态码会把「发出去了但没
+送达」当成成功，而这正是告警最不能出现的失效方式。这条检查**只对三家机器人生效**：
+「`errcode` 为 0 才算成功」是它们的约定，而 `generic` 发给的是对方自建的网关，
+那边返回 `{"code":200}` 完全可能就是成功，套用这条规则只会造出假警报。
+
+### 查看当前告警
+
+```console
+$ curl -s localhost:8080/api/alerts
+{"enabled":true,"failureThreshold":2,"repeatInterval":"PT0S","onlyCritical":false,
+ "channels":["log"],
+ "firing":[{"applicationId":"blog-admin","applicationName":"博客 管理端","group":"博客",
+            "critical":false,"state":"DOWN","since":"2026-08-13T02:00:00Z",
+            "lastNotifiedAt":"2026-08-13T02:00:30Z","notifications":1}]}
+```
+
+`firing` 只列**已经通知出去、还没恢复**的故障，和看板上的红点会不一致，而那种不一致恰恰是要看的：
+目标已经红了却不在这里，说明它还在抖动窗口内；在这里却已经绿了，说明恢复通知还没发出去。
+
+告警状态与巡检结果一样只放在内存里。平台重启后所有目标都会重新走一遍「连续 N 次才告警」，
+最多把重启期间就已存在的故障重报一次——这比把告警状态持久化再考虑一致性划算得多。
 
 ## 看板
 
@@ -407,6 +523,9 @@ $ curl -s localhost:8080/api/summary
 - MySQL 探针的 JDBC 调用跑在一个专用的小线程池上并带硬截止时间。
   调用线程是虚拟线程，而 JDK 21 上 Connector/J 内部大量 `synchronized` 会**钉住载体线程**，
   一台库不可达时会连累同一轮里其它目标的探测；挪到平台线程上，慢的代价就只由这一条目标承担
+- 告警的判据是 `HealthStatusStore.record()` 返回的状态变化，而不是「写完再读快照做比较」：
+  单个目标的手动重检不走全量巡检那把锁，同一个 id 可能被两个线程同时走到，分成两步就会
+  漏判或重复判——而告警只认状态变化。变化由存储层在自己的锁里算出，天然没有这个缝隙
 - 只引 `com.mysql:mysql-connector-j`（`runtime` 作用域），不引 `spring-boot-starter-jdbc`。
   少了 `spring-jdbc`，`DataSourceAutoConfiguration` 的条件不成立，Spring Boot 不会为本平台
   自动装配任何数据源，驱动只是探针手里的一个工具
@@ -424,6 +543,13 @@ $ curl -s localhost:8080/api/summary
 Redis 探针对着 `StubRedisServer` 跑——那是一个真的说 RESP 协议的假 Redis，因此覆盖的是完整链路
 （编码请求、解析应答、解析 `INFO`、判定降级、口令脱敏），不是对着 mock 断言。
 MySQL 没有可用的真实实例，覆盖的是不依赖对端的部分：JDBC 地址拼装与连不上时的失败路径。
+
+告警分三组用例。`AlertServiceTests` 测状态机，探测结果真的写进 `HealthStatusStore` 再拿它算出的
+变化去驱动——「连续失败几次」本身就是判据，手写一个假的 `Transition` 等于把要测的东西先假设成对的；
+发送侧换成同步实现，好让每条断言都是「这一次探测之后应不应该有通知」，而不是等待与超时的赌局。
+`AlertDispatcherTests` 单测异步投递：一个抛异常的通道不能连累排在它后面的通道。
+`WebhookAlertNotifierTests` 对着一个真的 HTTP 服务发，验的是序列化之后在线上的那一串到底长什么样、
+三家机器人各自的报文结构，以及对端返回 500 / 连不上 / `200 + errcode=310000` 时是不是真的不抛异常。
 
 `ConfigurationFilesConsistencyTests` 只读四份 `.properties`、不发任何网络请求（也不会启动上下文去
 连生产地址），断言六件事：主配置自带整份基线、主配置与 prod 档逐条一致、local 档与 dev 档逐条一致、
@@ -466,9 +592,15 @@ stdout 档的 `<logger>` 指向本仓包名。改日志配置时它是拦住「�
 - **请求线程**（看板页、`/api/**`、`/actuator/**`）——每行都带 traceId，可按 traceId 把一次
   页面刷新涉及的日志串起来；traceId 同时回写到响应头 `X-Trace-Id`，截到一次异常凭响应头即可
   定位日志行，不必按时间戳翻。
-- **后台巡检线程**（`HealthCheckScheduler` 定时轮与探针的并发子任务）——不经过任何请求，
-  MDC 为空，该位渲染为空串。这是有意为之：巡检日志本就按目标 id 检索，给巡检线程编一个假
-  traceId 只会让「有 traceId 就代表有对应请求」这个排障前提失真。
+- **后台巡检线程**（`HealthCheckScheduler` 定时轮与探针的并发子任务，以及告警的 `healthcheck-alert`
+  发送线程）——不经过任何请求，MDC 为空，该位渲染为空串。这是有意为之：巡检日志本就按目标 id
+  检索，给巡检线程编一个假 traceId 只会让「有 traceId 就代表有对应请求」这个排障前提失真。
+
+告警行用一个固定的 logger 名 `com.bgssai.healthcheck.ALERT`，与巡检的调试日志分开，采集侧与运维
+可以直接按它筛；每条告警**只占一行**（对端应答里的换行会被压平），因为它最常见的用法是事后
+`grep 告警` 拉出一段时间内的全部故障，多行会把每条记录拆散。恢复用 INFO，其余用 WARN——
+不用 ERROR：ERROR 在本产品线的口径里表示「本平台自己出错了」，而被监控方挂掉恰恰说明本平台
+在正常工作。人读的多行版本留给聊天机器人。
 
 ## 部署
 
@@ -485,7 +617,15 @@ Collect logs / Clear logs / Check app status 三条同名 Job，本端在该仓
 ```
 src/main/java/com/bgssai/healthcheck/
 ├── HealthCheckApplication.java
-├── config/HealthCheckProperties.java        # 全部配置项
+├── config/HealthCheckProperties.java        # 巡检的全部配置项
+├── alert/                                   # 告警：状态变化 → 通知
+│   ├── AlertProperties.java                 # 告警的全部配置项（自成一体，不并进上面那份）
+│   ├── AlertService.java                    # 状态机：什么时候该响、什么时候必须闭嘴
+│   ├── AlertEvent.java                      # 一条告警的不可变快照，自带人读的正文
+│   ├── AlertDispatcher.java                 # 专用线程 + 有界队列，逐通道投递
+│   ├── AlertNotifier.java                   # 通道接口，每个通道一个实现
+│   ├── LoggingAlertNotifier.java            # 单行、可 grep，零配置即生效
+│   └── WebhookAlertNotifier.java            # generic / wecom / dingtalk / feishu
 ├── domain/                                  # 状态枚举、目标类型与对外数据结构
 │   ├── TargetType.java                      # HTTP / ELASTICSEARCH / REDIS / MYSQL / TCP
 │   ├── ProbeDetail.java                     # 原始请求与应答

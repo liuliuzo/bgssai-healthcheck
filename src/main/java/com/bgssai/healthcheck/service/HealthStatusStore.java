@@ -34,9 +34,15 @@ public class HealthStatusStore {
         this.keepLastFailure = properties.detail().keepLastFailure();
     }
 
-    /** 记录一次探测结果。 */
-    public void record(String applicationId, ProbeResult result) {
-        this.entries.computeIfAbsent(applicationId, key -> new Entry())
+    /**
+     * 记录一次探测结果，并返回它带来的状态变化。
+     *
+     * <p>返回值由 {@code Entry} 在自己的锁里算出，而不是让调用方「先写、再读快照做比较」——
+     * 单个目标的手动重检不走全量巡检那把锁，两者可能同时落到同一个 id 上，分成两步就会漏判
+     * 或重复判状态变化，而告警恰恰只认状态变化。</p>
+     */
+    public Transition record(String applicationId, ProbeResult result) {
+        return this.entries.computeIfAbsent(applicationId, key -> new Entry())
                 .record(result, this.historySize, this.keepLastFailure);
     }
 
@@ -56,6 +62,22 @@ public class HealthStatusStore {
      * @param lastFailure 最近一次非正常的探测结果，从未失败时为 {@code null}
      */
     public record Snapshot(ProbeResult latest, ProbeResult lastFailure, HealthStats stats, List<HealthSample> history) {
+    }
+
+    /**
+     * 一次 {@link #record} 带来的状态变化。
+     *
+     * @param previous           本次之前的状态；该目标第一次被探测时为 {@code null}
+     * @param current            本次探测的结论
+     * @param consecutiveFailures 含本次在内的连续非正常次数，正常时为 0
+     * @param totalChecks        含本次在内的累计探测次数
+     */
+    public record Transition(HealthState previous, HealthState current, int consecutiveFailures, int totalChecks) {
+
+        /** 状态是否与上一次不同；首次探测算作变化。 */
+        public boolean changed() {
+            return this.previous != this.current;
+        }
     }
 
     /**
@@ -86,7 +108,8 @@ public class HealthStatusStore {
 
         private Instant lastDownAt;
 
-        synchronized void record(ProbeResult result, int historySize, boolean keepLastFailure) {
+        synchronized Transition record(ProbeResult result, int historySize, boolean keepLastFailure) {
+            HealthState previous = (this.latest == null) ? null : this.latest.state();
             this.latest = result;
             this.totalChecks++;
 
@@ -123,6 +146,8 @@ public class HealthStatusStore {
             while (this.history.size() > historySize) {
                 this.history.removeFirst();
             }
+
+            return new Transition(previous, state, this.consecutiveFailures, this.totalChecks);
         }
 
         synchronized Snapshot snapshot() {

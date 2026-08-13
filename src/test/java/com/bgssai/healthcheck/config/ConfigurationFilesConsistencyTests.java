@@ -243,15 +243,15 @@ class ConfigurationFilesConsistencyTests {
         assertThat(local).as("local 档与 dev 档同为开发目标").isEqualTo(dev);
         assertThat(dev).as("dev 档若与基线全等，说明生产地址被误抄进了开发档").isNotEqualTo(baseline);
 
-        // 开发与生产地址相同的只有三条，且都是有据可查的：平台自身探本机，
-        // SaaS 两端 dev / prod 共用同一台腾讯云机器（腾讯云只有公网 IP，且两档同机）。
+        // 开发与生产地址相同的只剩平台自身（探本机 127.0.0.1）。SaaS 生产已迁华为云境外
+        // （admin=122.8.185.32 / user=122.8.178.143），开发仍在腾讯云，两档不再同机。
         // 境外 Redis 其实也是 dev / prod 同机，但两档的条目 id 不同（redis-dev / redis-global），
         // 因此不会落进这个按 id 比对的集合里。
         Set<String> sharedAddresses = baseline.entrySet().stream()
                 .filter(entry -> entry.getValue().equals(dev.get(entry.getKey())))
                 .map(Map.Entry::getKey)
                 .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
-        assertThat(sharedAddresses).containsExactly("healthcheck-platform", "saas-admin", "saas-user");
+        assertThat(sharedAddresses).containsExactly("healthcheck-platform");
     }
 
     /** 该文件应当有的完整 id 清单：19 条应用 + 本环境的中间件与数据库。 */

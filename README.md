@@ -209,7 +209,7 @@ MySQL 的辅助查询（版本、连接数、库清单）失败时**不会**把�
 
 | 文件 | 生效条件 | 巡检目标 | 条数 |
 |---|---|---|---|
-| `src/main/resources/application.properties` | 不指定 profile（默认档） | 生产（华为云-境内-上海一 + 腾讯云） | 25 |
+| `src/main/resources/application.properties` | 不指定 profile（默认档） | 生产（华为云-境内-上海一 + 华为云-境外） | 25 |
 | `src/main/resources/application-prod.properties` | `SPRING_PROFILES_ACTIVE=prod` | 同上，与主配置逐条一致 | 25 |
 | `src/main/resources/application-dev.properties` | `SPRING_PROFILES_ACTIVE=dev` | 开发（华为云-境外-墨西哥二 + 腾讯云） | 22 |
 | `src/main/resources/application-local.properties` | `SPRING_PROFILES_ACTIVE=local` | 同 dev，笔记本本机启动用 | 22 |
@@ -241,10 +241,10 @@ MySQL 的辅助查询（版本、连接数、库清单）失败时**不会**把�
 1. **端口是 443、协议是 HTTPS**。18 个后端在 dev / prod 都是 `server.port=443` + `server.ssl.enabled=true`
    （各产品仓 profile 实测），`8080` / `8081` 只是本地开发端口。
 2. **用公网 IP**。境内华为云私网是 `172.31.x`、境外是 `192.168.0.x`，属两个不同区域 / VPC，一台机器
-   走不通对面私网；腾讯云 SaaS 更是只有公网 IP。只有公网 IP 这一套能同时覆盖三处。本平台部署在境内
+   走不通对面私网。只有公网 IP 这一套能同时覆盖两地。本平台部署在境内
    `123.60.68.201`（私网 `172.31.6.116`），与生产档 14 条境内条目同属 `172.31.x`，**想省公网流量可把
-   这 14 条换成私网地址**（每条的私网地址都写在它上方的注释里）；GEO 海外与腾讯云 SaaS 这 4 条，以及
-   整份 dev 档（境外 `192.168.0.x`），只能走公网。
+   这 14 条换成私网地址**（每条的私网地址都写在它上方的注释里）；GEO 海外与生产 SaaS（华为云境外、
+   与中间件共机）这 4 条，以及整份 dev 档（境外 `192.168.0.x` + 腾讯云开发 SaaS），只能走公网。
 3. **`skip-tls-verification=true`**。证书签给的是业务域名（`www.bgssai-blog.com` 等），而这里按机器 IP
    直连，TLS 握手会因主机名不匹配失败，健康的应用会被整片误判为 DOWN。三台 Elasticsearch 同理——
    它们用的是自签证书（`curl` 需要 `-k`）。见下一节。

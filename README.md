@@ -659,5 +659,5 @@ src/main/resources/
 ├── log/logback-spring_file.xml     # dev / local / prod：落 /opt/bgssai/log + 控制台
 ├── log/logback-spring_stdout.xml   # test：只打控制台
 ├── templates/{index.html, detail.html}
-└── static/{css/app.css, js/app.js, favicon.svg}
+└── static/{css/app.css, js/app.js, favicon.png, favicon.ico, apple-touch-icon.png, brand/bgss-mark-tile.png}
 ```

@@ -277,7 +277,7 @@ class HealthCheckApplicationTests {
 
         String html = response.getBody();
         assertThat(html).isNotNull();
-        assertThat(html).contains("BGSSAI 应用健康巡检")
+        assertThat(html).contains("BGSSAI 健康巡检")
                 // 应用名、分组名来自模型对象的 record 访问器
                 .contains("正常服务")
                 .contains("核心服务")

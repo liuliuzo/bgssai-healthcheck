@@ -3,17 +3,20 @@
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>BGSSAI 应用健康巡检</title>
-    <link rel="icon" type="image/svg+xml" th:href="@{/favicon.svg}"/>
+    <title>BGSSAI 健康巡检</title>
+    <link rel="icon" type="image/png" href="/favicon.png" th:href="@{/favicon.png}"/>
+    <link rel="shortcut icon" href="/favicon.ico" th:href="@{/favicon.ico}"/>
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" th:href="@{/apple-touch-icon.png}"/>
     <link rel="stylesheet" th:href="@{/css/app.css}"/>
 </head>
 <body th:attr="data-refresh-seconds=${dashboard.summary.uiRefreshSeconds}">
 
 <header class="topbar">
     <div class="topbar__brand">
-        <span class="topbar__logo" aria-hidden="true">◎</span>
+        <img class="topbar__logo" src="/brand/bgss-mark-tile.png"
+             th:src="@{/brand/bgss-mark-tile.png}" alt=""/>
         <div>
-            <h1 class="topbar__title">BGSSAI 应用健康巡检</h1>
+            <h1 class="topbar__title">BGSSAI 健康巡检</h1>
             <p class="topbar__subtitle">周期性调用各应用的健康检查接口，汇总展示运行状态</p>
         </div>
     </div>
@@ -194,7 +197,7 @@
 </dialog>
 
 <footer class="pagefoot">
-    <span>BGSSAI 应用健康巡检 · Spring Boot 4.1 / Java 21</span>
+    <span>BGSSAI 健康巡检 · Spring Boot 4.1 / Java 21</span>
     <span>接口：<code>/api/apps</code> · <code>/api/summary</code> · <code>/api/dashboard</code> · <code>/api/report.md</code></span>
 </footer>
 

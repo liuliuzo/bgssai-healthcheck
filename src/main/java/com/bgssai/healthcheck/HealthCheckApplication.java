@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
- * BGSSAI 应用健康巡检平台入口。
+ * BGSSAI 健康巡检平台入口。
  *
  * <p>平台周期性地调用被监控应用的健康检查接口，把结果缓存在内存中，
  * 通过 REST 接口和 Thymeleaf 看板对外展示。</p>

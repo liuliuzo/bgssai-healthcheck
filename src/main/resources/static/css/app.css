@@ -1,4 +1,4 @@
-/* BGSSAI 应用健康巡检 —— 看板样式 */
+/* BGSSAI 健康巡检 —— 看板样式 */
 
 :root {
     color-scheme: light dark;
@@ -97,9 +97,11 @@ code {
 }
 
 .topbar__logo {
-    font-size: 28px;
-    line-height: 1;
-    color: var(--accent);
+    display: block;
+    width: 44px;
+    height: 44px;
+    object-fit: contain;
+    flex: 0 0 auto;
 }
 
 .topbar__title {

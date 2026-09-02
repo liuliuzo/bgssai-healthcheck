@@ -30,9 +30,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class LoggingConfigurationTests {
 
-    /** 三个跑在服务器 / 笔记本上的档，都必须落文件——否则 bgssai-logs 采不到东西。 */
+    /** 与产品线其余仓一致：dev / test / prod 三档落文件——否则 bgssai-logs 采不到东西；local 只打控制台。 */
     private static final List<String> FILE_LOGGING_PROFILES =
-            List.of("application-dev.properties", "application-local.properties", "application-prod.properties");
+            List.of("application-dev.properties", "application-test.properties", "application-prod.properties");
 
     private static final String FILE_CONFIG = "classpath:log/logback-spring_file.xml";
 
@@ -41,7 +41,7 @@ class LoggingConfigurationTests {
     private static final String APPLOG_PATH = "/opt/bgssai/log";
 
     @Test
-    @DisplayName("dev / local / prod 三档都把 logging.config 指向落文件的 logback 配置，并落在采集路径下")
+    @DisplayName("dev / test / prod 三档都把 logging.config 指向落文件的 logback 配置，并落在采集路径下")
     void runtimeProfilesWireTheFileAppender() {
         for (String file : FILE_LOGGING_PROFILES) {
             Properties properties = read(file);
@@ -58,12 +58,12 @@ class LoggingConfigurationTests {
     }
 
     @Test
-    @DisplayName("测试档只打控制台：跑一遍 mvn test 不该在开发机上凭空生成日志文件")
-    void testProfileStaysOnStdout() {
-        Properties properties = read("application-test.properties");
+    @DisplayName("local 档只打控制台：笔记本上跑起来不该凭空往 /opt/bgssai/log 写文件")
+    void localProfileStaysOnStdout() {
+        Properties properties = read("application-local.properties");
 
         assertThat(properties.getProperty("logging.config"))
-                .as("测试档若也用 file 档，CI 容器里 /opt/bgssai/log 不可写会直接报错")
+                .as("local 档若也用 file 档，开发机上会凭空生成一份 bgssai-healthcheck_unstrct.log")
                 .isEqualTo(STDOUT_CONFIG);
     }
 

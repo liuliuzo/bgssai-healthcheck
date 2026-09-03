@@ -1,5 +1,21 @@
 # CLAUDE.md
 
+## 产品线规划（全线统一）
+
+BGSSAI 产品线按下面五条划分职责，各仓实现与文档不得与此冲突。
+
+1. **BGSSAI** 是给一人公司（OPC）创业者的全行业工具集合，让用户能找到创业所需的全部工具。
+2. **bgssai-website** 是公司官网，只对外介绍产品与服务，不承载产品操作、在线对话或中心账号。
+3. **bgssai-chat** 提供对标 ChatGPT / Gemini / Claude home / Grok 的 Web 在线对话 AI。
+4. **中心用户账号在 bgssai-chat**：可授权登录旗下各 App；各 App 同时可以有自己的用户账号体系，两者并存。
+5. **bgssai-bot** 对标 Grok Bot。BGSSAI 的全部产品应用可以托管给 Bot 直接操作。
+
+Tokenhub / Tokenhub-CN 是模型网关，不是业务 App，也不是 oauth_client。
+
+愿景唯一权威：`bgssai-skeleton/docs/PRODUCT-LINE-VISION.md`。本段是各仓副本，变更以该文件为准。
+
+**本仓位置**：巡检仓，非业务工具。
+
 > 本文件与 `AGENTS.md` 内容保持一致（供不同 AI 工具各自读取），改一处必须同步改另一处。
 
 ## 仓库定位

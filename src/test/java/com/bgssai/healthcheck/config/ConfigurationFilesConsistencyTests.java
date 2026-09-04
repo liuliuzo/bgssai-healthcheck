@@ -119,7 +119,7 @@ class ConfigurationFilesConsistencyTests {
         assertThat(platform.critical()).as("平台自身若标成 critical，报过一次 DOWN 就再也回不到 UP").isFalse();
 
         assertThat(baseline.subList(1, EXPECTED_APP_IDS.size())).allSatisfy(target -> {
-            assertThat(target.url()).startsWith("https://").endsWith("/bgssai/health/readiness");
+            assertThat(target.url()).startsWith("http://").contains(":8080/").endsWith("/bgssai/health/readiness");
             assertThat(target.enabled()).isTrue();
             assertThat(target.critical()).as("下游应用挂了不该把本平台自己拖成 DOWN").isFalse();
             assertThat(target.skipTlsVerification())

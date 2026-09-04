@@ -131,7 +131,7 @@ public class HttpHealthProbe implements HealthProbe {
 
     @Override
     public Set<TargetType> supportedTypes() {
-        return Set.of(TargetType.HTTP, TargetType.ELASTICSEARCH);
+        return Set.of(TargetType.HTTP, TargetType.ELASTICSEARCH, TargetType.BOXPOOL);
     }
 
     /**
@@ -198,6 +198,17 @@ public class HttpHealthProbe implements HealthProbe {
             String clusterNote = describeCluster(parsed);
             if (clusterNote != null) {
                 message = (message == null) ? clusterNote : message + "；" + clusterNote;
+            }
+        }
+        else if (app.type() == TargetType.BOXPOOL) {
+            components = boxPoolComponents(parsed, components);
+            String capacityNote = describeCapacity(parsed);
+            if (capacityNote != null) {
+                message = (message == null) ? capacityNote : message + "；" + capacityNote;
+            }
+            // 宿主活着但一个人都接不下，等同于对用户不可用——不能报绿。
+            if (state == HealthState.UP && readLong(parsed.payload(), "headroom") <= 0L) {
+                state = HealthState.DEGRADED;
             }
         }
 
@@ -474,6 +485,46 @@ public class HttpHealthProbe implements HealthProbe {
                 pick(payload, "number_of_pending_tasks", "number_of_in_flight_fetch",
                         "task_max_waiting_in_queue_millis")));
         return sortBySeverity(components);
+    }
+
+    /**
+     * 把云电脑宿主的水位拆成两个子组件：还能接几个人、这台机器上存了多少人的电脑。
+     *
+     * <p>分开是因为两者的含义完全不同，混在一起看会得出错误结论：{@code headroom} 受
+     * <strong>内存</strong>约束，是「现在还能让几个人同时上来」；{@code boxesTotal} 受
+     * <strong>磁盘</strong>约束，是「这台机器上一共有多少人的电脑」——box 休眠时不占内存，
+     * 只占一百多兆磁盘，所以后者通常比前者大一个数量级。</p>
+     */
+    private static List<ComponentStatus> boxPoolComponents(ParsedBody parsed, List<ComponentStatus> fallback) {
+        Map<?, ?> payload = parsed.payload();
+        if (payload == null || payload.isEmpty()) {
+            return fallback;
+        }
+        List<ComponentStatus> components = new ArrayList<>();
+
+        long headroom = readLong(payload, "headroom");
+        components.add(new ComponentStatus("在线容量", (headroom > 0L) ? HealthState.UP : HealthState.DEGRADED,
+                pick(payload, "headroom", "online", "maxOnline")));
+
+        // 休眠的 box 只占磁盘，不参与在线容量的判定，所以恒 UP，只报数。
+        components.add(new ComponentStatus("已开电脑", HealthState.UP,
+                pick(payload, "boxesTotal", "freeMemMb", "boxMemMb")));
+        return sortBySeverity(components);
+    }
+
+    /** 看板上那一行摘要，直接说人话：还能接几个人。 */
+    private static String describeCapacity(ParsedBody parsed) {
+        Map<?, ?> payload = parsed.payload();
+        if (payload == null || payload.isEmpty()) {
+            return null;
+        }
+        long headroom = readLong(payload, "headroom");
+        long online = readLong(payload, "online");
+        long max = readLong(payload, "maxOnline");
+        if (headroom <= 0L) {
+            return "已满：在线 " + online + "/" + max + "，接不下新用户了";
+        }
+        return "还能接 " + headroom + " 人同时用（在线 " + online + "/" + max + "）";
     }
 
     private static String describeCluster(ParsedBody parsed) {

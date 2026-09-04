@@ -27,7 +27,16 @@ public enum TargetType {
     MYSQL("MySQL", List.of("mysql"), 3306),
 
     /** 只验证 TCP 端口可连通，用于没有专用探针的中间件。 */
-    TCP("TCP 端口", List.of("tcp"), -1);
+    TCP("TCP 端口", List.of("tcp"), -1),
+
+    /**
+     * bgssai-bot 的云电脑宿主，读它的 {@code /v1/capacity}。
+     *
+     * <p>和别的目标不同，这里最要紧的不是「活着没有」，而是<strong>还能再接几个人同时用</strong>：
+     * 每个用户一台带桌面的容器，宿主内存一到底就再也开不出新的，而这些宿主上还跑着
+     * 产品服务，不能等它们被拖垮才发现。所以看板要把余量当成主指标显示。</p>
+     */
+    BOXPOOL("云电脑宿主", List.of("http", "https"), -1);
 
     private final String label;
 
@@ -65,9 +74,9 @@ public enum TargetType {
         return (scheme != null) && this.schemes.contains(scheme.toLowerCase(Locale.ROOT));
     }
 
-    /** 走 HTTP 客户端的类型：HTTP 与 Elasticsearch 共用同一套请求与响应捕获逻辑。 */
+    /** 走 HTTP 客户端的类型：三者共用同一套请求、TLS、超时与响应捕获逻辑。 */
     public boolean isHttpBased() {
-        return this == HTTP || this == ELASTICSEARCH;
+        return this == HTTP || this == ELASTICSEARCH || this == BOXPOOL;
     }
 
     /**

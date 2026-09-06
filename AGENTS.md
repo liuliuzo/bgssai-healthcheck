@@ -48,6 +48,7 @@ BGSSAI 产品线按下面八条划分职责，各仓实现与文档不得与此�
 | `master` | 生产冻结 | 生产环境 |
 
 - **AI Agent 必须先创建自己的 feature 分支再改文件**；禁止直接在 `develop` / `release` / `master` / `main` 上改。
+- **多 Agent 并行：各自开独立工作目录（git worktree）**。grok-build、Claude Code、codex、cursor、gemini 会同时在同一个工作区（`Desktop/github`）上干活，而主工作区的工作树与 HEAD 是共用的——别人 `checkout` 一次就把你的 HEAD 带走，你的提交会落到别人的分支上。**接到任务先在仓库目录之外建一个独立 worktree**（形如 `github/.<工具名>-worktrees/<任务名>/<仓名>`），在里面开自己的 `feature/*` 分支，各管各的；**合并成功后把这个工作文件夹删掉**（`git worktree remove`）。实在要在主工作区改，每次写文件前先 `git branch --show-current` 确认自己还在自己的分支上。
 - Feature 合入 **`develop`**（先开 PR）。`develop` → `release`、`release` → `master` 的晋升同样先开 PR。
 - 开发环境发布 **`develop`**；测试环境发布 **`release`**；生产环境发布 **`master`**。
 - 用户明确同意合并或直接要求合并时，可以执行指定 PR 的合并，无需再次询问。

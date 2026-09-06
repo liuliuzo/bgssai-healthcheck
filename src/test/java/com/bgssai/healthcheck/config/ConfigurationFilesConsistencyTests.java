@@ -82,7 +82,8 @@ class ConfigurationFilesConsistencyTests {
     private static final List<String> EXPECTED_PROD_INFRA_IDS = List.of(
             "mysql-cn", "mysql-global",
             "redis-cn", "redis-global",
-            "elasticsearch-cn", "elasticsearch-global");
+            "elasticsearch-cn", "elasticsearch-global",
+            "boxpool-global");
 
     /** 开发只有境外一套中间件与数据库。 */
     private static final List<String> EXPECTED_DEV_INFRA_IDS = List.of(

@@ -1,20 +1,24 @@
 ---
-description: BGSSAI 产品线五条规划（全仓统一，含 website）
+description: BGSSAI 产品线八条规划（全仓统一）
 alwaysApply: true
 ---
 
 # 产品线规划（全线统一）
 
-BGSSAI 产品线按下面六条划分职责，各仓实现与文档不得与此冲突。
+BGSSAI 产品线按下面八条划分职责，各仓实现与文档不得与此冲突。
 
-1. **BGSSAI** 是给一人公司（OPC）创业者的全行业工具集合，让用户能找到创业所需的全部工具。
-2. **bgssai-website** 是公司官网，只对外介绍产品与服务，不承载产品操作、在线对话或中心账号。
-3. **bgssai-chat** 提供对标 ChatGPT / Gemini / Claude home / Grok 的 Web 在线对话 AI。
-4. **中心用户账号在 bgssai-chat**：可以用 bgssai-chat 登录所有 BGSSAI 应用；各 App 也可以有自己的用户账号体系。
-5. **bgssai-bot** 对标 Grok Bot。BGSSAI 的全部产品应用可以托管给 Bot 直接操作。
-6. **bgssai-tokenhub** 是模型能力中枢，对接主流模型原生 API 并统一提供给旗下产品；分为境外 `bgssai-tokenhub-global` 与境内 `bgssai-tokenhub-cn`。
+1. **BGSSAI** 是给一人公司（OPC）创业者的全行业工具集合，让用户能找到 OPC 创业时所有需要的工具。
+2. **bgssai-website** 是公司官网，对外介绍公司的产品和服务；`reference` 目录中的 `reference-website` 是原来的官网。官网无登录，不承载产品操作、在线对话或中心账号。
+3. **bgssai-chat** 提供类似 ChatGPT、Gemini、Claude home、Grok 的 Web 在线对话 AI。境内仓为 `bgssai-chat-cn`，境外仓为 `bgssai-chat-global`。
+4. **中心用户账号在 bgssai-chat**：用和 Google、GitHub 一样的**第三方登录**接入各 App，不是单点登录。Chat 也可以授权登录不是 BGSSAI 的应用。各 App 也可以有自己的用户账号体系。境内应用走 `bgssai-chat-cn`，境外应用走 `bgssai-chat-global`。
+5. **bgssai-bot** 对标 Grok Bot；BGSSAI 的全部产品应用可以托管给 Bot 直接操作。参考 grok-bot、openclaw、hermes-agent、grok-build。
+6. **bgssai-tokenhub** 是模型中枢，对接主流模型原生 API，再提供给旗下产品。`bgssai-tokenhub-global` 对接国际主流模型，`bgssai-tokenhub-cn` 对接中国大陆模型。它们不是业务 App，无用户登录。
+7. **面向 OPC 的工具集合基本是 B2C**。
+8. **境外应用**只有：`bgssai-geo-global`、`bgssai-saas-global`、`bgssai-tokenhub-global`、`bgssai-chat-global`。其余有用户端的应用按境内处理。
 
-Tokenhub / Tokenhub-CN 是产品线模型中枢：对接主流模型原生 API，再提供给旗下产品使用。tokenhub-global 对接国际主流模型，tokenhub-cn 对接中国大陆模型。它们不是业务 App，也不是 oauth_client。
+`bgssai-docmost` 与 `bgssai-build` 是研发解决方案，不是第 1 条工具，也不上官网。用户从 Docmost 站点下载 Build。Build 写代码时把软件工程文档（需求说明、概要设计、详细设计、类图、流程图、时序图、泳道图、状态图等）写入 Docmost；简单图用 Mermaid，拓扑 / 动画 / 状态机用自包含 HTML（参考 `reference/docmost/htmldemo`）。用户可自己编辑，也可和 Agent 对话修改，改完发送给 Build 继续编程。Docmost 参考开源 docmost；Build 参考 grok-build 与 Cursor；Bot 参考 grok-bot、openclaw、hermes-agent、grok-build。所有参考项目在 `reference` 目录。
+
+有用户端的应用必须支持账号密码、邮箱验证码、手机验证码登录。中国大陆境内应用另需微信、抖音、百度、支付宝登录。中国大陆境外应用另需 Google 账户与 GitHub 登录。官网无登录。管理端不开放注册。Tokenhub 不是业务 App，无用户登录。
 
 愿景唯一权威：`bgssai-skeleton/docs/PRODUCT-LINE-VISION.md`。本规则是工作区副本，变更以该文件为准。
 

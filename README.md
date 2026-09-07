@@ -9,7 +9,7 @@ BGSSAI 产品线按下面八条划分职责，各仓实现与文档不得与此�
 3. **bgssai-chat** 提供类似 ChatGPT、Gemini、Claude home、Grok 的 Web 在线对话 AI。境内仓为 `bgssai-chat-cn`，境外仓为 `bgssai-chat-global`。
 4. **中心用户账号在 bgssai-chat**：用和 Google、GitHub 一样的**第三方登录**接入各 App，不是单点登录。Chat 也可以授权登录不是 BGSSAI 的应用。各 App 也可以有自己的用户账号体系。境内应用走 `bgssai-chat-cn`，境外应用走 `bgssai-chat-global`。
 5. **bgssai-bot** 对标 Grok Bot；BGSSAI 的全部产品应用可以托管给 Bot 直接操作。参考 grok-bot、openclaw、hermes-agent、grok-build、mycontext、deepseek-harness。
-6. **bgssai-tokenhub** 是模型中枢，对接主流模型原生 API，再提供给旗下产品。`bgssai-tokenhub-global` 对接国际主流模型，`bgssai-tokenhub-cn` 对接中国大陆模型。两仓都有用户端，对标腾讯云 TokenHub（`reference/tokenhub-prototypes`）；用户端走登录规范，也可用 Chat 登录。旗下产品调模型走中枢凭证。
+6. **bgssai-tokenhub** 是模型中枢，对接主流模型原生 API，再提供给旗下产品和 BGSSAI 外部用户。`bgssai-tokenhub-global` 对接国际主流模型，`bgssai-tokenhub-cn` 对接中国大陆模型。两仓都有用户端，对标腾讯云 TokenHub（`reference/tokenhub-prototypes`）；用户端走登录规范，也可用 Chat 登录。旗下产品和外部用户调模型都走中枢凭证。
 7. **面向 OPC 的工具集合基本是 B2C**。
 8. **境外应用**只有：`bgssai-geo-global`、`bgssai-saas-global`、`bgssai-tokenhub-global`、`bgssai-chat-global`。其余有用户端的应用按境内处理。
 

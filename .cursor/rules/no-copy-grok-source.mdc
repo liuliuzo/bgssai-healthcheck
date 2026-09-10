@@ -1,0 +1,16 @@
+---
+description: 对照 grok 相关参考项目，禁止拷贝其源码进产品仓
+alwaysApply: true
+---
+
+# 对照 ≠ 拷贝 grok 源码（强制）
+
+愿景里可以写、也必须写清：`bgssai-bot` 对标 Grok Bot，对照 grok-bot、openclaw、hermes-agent、grok-build、mycontext、deepseek-harness。这些名字可以出现在规划里。
+
+**禁止：** 从 `reference/grok-build`、grok-bot 以及其它 grok 相关项目里拷贝、粘贴或整目录搬源码，写进 `bgssai-bot` 或其它产品仓。
+
+**允许：**
+
+- 读 `reference/` 做对照（界面、能力、边界），按 BGSSAI 自己的仓实现
+- `bgssai-build` 作为官方 fork，只在该仓按 Git Flow 同步上游（`main` 只跟上游）
+- Bot 通过依赖使用 `bgssai-build` 内核，不要再复制一份 grok 源码

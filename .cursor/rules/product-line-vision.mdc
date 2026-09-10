@@ -11,12 +11,12 @@ BGSSAI 产品线按下面八条划分职责，各仓实现与文档不得与此�
 2. **bgssai-website** 是公司官网，对外介绍公司的产品和服务；`reference` 目录中的 `reference-website` 是原来的官网。官网无登录，不承载产品操作、在线对话或中心账号。
 3. **bgssai-chat** 提供类似 ChatGPT、Gemini、Claude home、Grok 的 Web 在线对话 AI。境内仓为 `bgssai-chat-cn`，境外仓为 `bgssai-chat-global`。
 4. **中心用户账号在 bgssai-chat**：用和 Google、GitHub 一样的**第三方登录**接入各 App，不是单点登录。Chat 也可以授权登录不是 BGSSAI 的应用。各 App 也可以有自己的用户账号体系。境内应用走 `bgssai-chat-cn`，境外应用走 `bgssai-chat-global`。
-5. **bgssai-bot** 对标 Grok Bot；BGSSAI 的全部产品应用可以托管给 Bot 直接操作。参考 grok-bot、openclaw、hermes-agent、grok-build、mycontext、deepseek-harness。
+5. **bgssai-bot** 对标 Grok Bot；BGSSAI 的全部产品应用可以托管给 Bot 直接操作。参考 grok-bot、openclaw、hermes-agent、grok-build、mycontext、deepseek-harness。对照这些项目，不要从 grok-build 等 grok 项目拷贝源码进产品仓；内核只走 bgssai-build 官方 fork。
 6. **bgssai-tokenhub** 是模型中枢，对接主流模型原生 API，再提供给旗下产品和 BGSSAI 外部用户。`bgssai-tokenhub-global` 对接国际主流模型，`bgssai-tokenhub-cn` 对接中国大陆模型。两仓都有用户端，对标腾讯云 TokenHub（`reference/tokenhub-prototypes`）；用户端走登录规范，也可用 Chat 登录。旗下产品和外部用户调模型都走中枢凭证。
 7. **面向 OPC 的工具集合基本是 B2C**。
 8. **境外应用**只有：`bgssai-geo-global`、`bgssai-saas-global`、`bgssai-tokenhub-global`、`bgssai-chat-global`。其余有用户端的应用按境内处理。
 
-`bgssai-docmost` 与 `bgssai-build` 是研发解决方案，不是第 1 条工具，也不上官网。用户从 Docmost 站点下载 Build，Build 也能引导到 Docmost。Build 写代码时把软件工程文档（需求说明、概要设计、详细设计、类图、流程图、时序图、泳道图、状态图等）写入 Docmost。Docmost 要能承载 HTML：Build 可生成 HTML 格式设计并发布到 Docmost，版式与交互对照 `reference/wiki/htmldemo`。用户可自己编辑，也可和 Agent 对话修改，改完发送给 Build 继续编程。Docmost 参考开源 docmost；Build 参考 grok-build、Cursor、DeepSeek-Coder；Bot 参考 grok-bot、openclaw、hermes-agent、grok-build、mycontext、deepseek-harness。Tokenhub 管理端大模型 API Key 管理对照 dify。short 对照 waoowaoo、Jellyfish、ArcReel、LocalMiniDrama、openframe、ZJT（reference/short/）。所有参考项目在 `reference` 目录。
+`bgssai-docmost` 与 `bgssai-build` 是研发解决方案，不是第 1 条工具，也不上官网。用户从 Docmost 站点下载 Build，Build 也能引导到 Docmost。Build 写代码时把软件工程文档（需求说明、概要设计、详细设计、类图、流程图、时序图、泳道图、状态图等）写入 Docmost。Docmost 要能承载 HTML：Build 可生成 HTML 格式设计并发布到 Docmost，版式与交互对照 `reference/wiki/htmldemo`。用户可自己编辑，也可和 Agent 对话修改，改完发送给 Build 继续编程。Docmost 参考开源 docmost；Build 参考 grok-build、Cursor、DeepSeek-Coder；Bot 参考 grok-bot、openclaw、hermes-agent、grok-build、mycontext、deepseek-harness。对照这些项目，不要从 grok-build 等 grok 项目拷贝源码进产品仓；内核只走 bgssai-build 官方 fork。Tokenhub 管理端大模型 API Key 管理对照 dify。short 对照 waoowaoo、Jellyfish、ArcReel、LocalMiniDrama、openframe、ZJT（reference/short/）。所有参考项目在 `reference` 目录。
 
 有用户端的应用必须支持账号密码、邮箱验证码、手机验证码登录。中国大陆境内应用另需微信、抖音、百度、支付宝登录。中国大陆境外应用另需 Google 账户与 GitHub 登录。官网无登录。管理端不开放注册。除官网用户端外，所有应用平台未登录时默认进入登录页。
 

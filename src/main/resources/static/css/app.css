@@ -300,7 +300,13 @@ code {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 12px;
-    margin-bottom: 24px;
+    margin-bottom: 12px;
+}
+
+.probe-caveat {
+    margin: 0 0 24px;
+    color: var(--text-muted);
+    font-size: 13px;
 }
 
 .stat {

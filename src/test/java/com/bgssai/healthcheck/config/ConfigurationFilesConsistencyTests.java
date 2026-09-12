@@ -43,8 +43,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 编译期或启动期报错，只会在切换 profile 后悄悄探测到过时的地址。这组用例把那个「悄悄」
  * 变成构建失败。</p>
  *
- * <p>清单分两段：前 19 条是平台自身与 9 个产品的 18 个后端，四份文件完全相同；后面是
- * 中间件与数据库，<strong>生产两地各一套（6 条）、开发只有一套（3 条）</strong>，因此
+ * <p>清单分两段：前 37 条是平台自身与 18 个产品的 36 个后端，四份文件完全相同；后面是
+ * 中间件与数据库，<strong>生产两地各一套（另加云电脑宿主，共 7 条）、开发只有一套（3 条）</strong>，因此
  * prod 家族与 dev 家族的条数本就不同，不能要求四份文件的 id 清单全等——能要求的是
  * 主配置 = prod 档、local 档 = dev 档。</p>
  *
@@ -65,8 +65,8 @@ class ConfigurationFilesConsistencyTests {
 
     private static final Pattern INDEXED_KEY = Pattern.compile("^\\Q" + PREFIX + "\\E\\[(\\d+)]\\.(.+)$");
 
-    /** 平台自身 + 9 个产品 × 管理端 / 用户端，顺序即看板上的顺序，四份文件相同。 */
-    private static final List<String> EXPECTED_APP_IDS = List.of(
+    /** 平台自身 + 已部署产品 × 管理端 / 用户端，顺序即看板上的顺序，四份文件相同。 */
+    private static final List<String> DEPLOYED_APP_IDS = List.of(
             "healthcheck-platform",
             "blog-admin", "blog-user",
             "builder-admin", "builder-user",
@@ -77,6 +77,25 @@ class ConfigurationFilesConsistencyTests {
             "saas-admin", "saas-user",
             "voiceunion-admin", "voiceunion-user",
             "vpn-admin", "vpn-user");
+
+    /**
+     * 已列入清单、主机尚未登记的产品后端。路径按 Standards §13.7 写成
+     * {@code /bgssai/health/readiness}，{@code enabled=false}，避免对占位地址误报 DOWN。
+     */
+    private static final List<String> PENDING_APP_IDS = List.of(
+            "long-admin", "long-user",
+            "media-admin", "media-user",
+            "office-admin", "office-user",
+            "bgsschat-cn-admin", "bgsschat-cn-user",
+            "bgsschat-global-admin", "bgsschat-global-user",
+            "short-admin", "short-user",
+            "note-admin", "note-user",
+            "tokenhub-cn-admin", "tokenhub-cn-user",
+            "tokenhub-global-admin", "tokenhub-global-user");
+
+    /** 平台自身 + 已部署与待登记产品后端，顺序即看板上的顺序，四份文件相同。 */
+    private static final List<String> EXPECTED_APP_IDS = Stream.concat(
+            DEPLOYED_APP_IDS.stream(), PENDING_APP_IDS.stream()).toList();
 
     /** 生产的中间件与数据库：境内 / 境外各一套。 */
     private static final List<String> EXPECTED_PROD_INFRA_IDS = List.of(
@@ -107,7 +126,7 @@ class ConfigurationFilesConsistencyTests {
     private static final Mysql MYSQL = new Mysql(90, 3);
 
     @Test
-    @DisplayName("主配置自带整份基线：19 条应用 + 6 条中间件与数据库，不指定 profile 也不会是空看板")
+    @DisplayName("主配置自带整份基线：37 条应用 + 中间件与数据库，不指定 profile 也不会是空看板")
     void mainConfigCarriesTheProductionBaseline() {
         List<Target> baseline = bindFile(MAIN);
 
@@ -119,7 +138,11 @@ class ConfigurationFilesConsistencyTests {
         assertThat(platform.url()).isEqualTo("http://127.0.0.1:8080/actuator/health");
         assertThat(platform.critical()).as("平台自身若标成 critical，报过一次 DOWN 就再也回不到 UP").isFalse();
 
-        assertThat(baseline.subList(1, EXPECTED_APP_IDS.size())).allSatisfy(target -> {
+        Map<String, Target> byId = new LinkedHashMap<>();
+        baseline.forEach(target -> byId.put(target.id(), target));
+
+        DEPLOYED_APP_IDS.stream().skip(1).forEach(id -> {
+            Target target = byId.get(id);
             assertThat(target.url()).startsWith("http://").contains(":8080/").endsWith("/bgssai/health/readiness");
             assertThat(target.enabled()).isTrue();
             assertThat(target.critical()).as("下游应用挂了不该把本平台自己拖成 DOWN").isFalse();
@@ -127,6 +150,22 @@ class ConfigurationFilesConsistencyTests {
                     .as("按 IP 直连时证书主机名对不上，不放开校验会被整片误判为 DOWN")
                     .isTrue();
         });
+
+        PENDING_APP_IDS.forEach(id -> {
+            Target target = byId.get(id);
+            assertThat(target).as("清单必须覆盖 %s", id).isNotNull();
+            assertThat(target.url()).endsWith("/bgssai/health/readiness");
+            assertThat(target.enabled())
+                    .as("%s 主机未登记，打开巡检会对占位地址误报 DOWN", id)
+                    .isFalse();
+            assertThat(target.critical()).isFalse();
+        });
+
+        assertThat(PENDING_APP_IDS).as("探活清单必须覆盖 long / media / office / bgsschat")
+                .contains("long-admin", "long-user", "media-admin", "media-user",
+                        "office-admin", "office-user",
+                        "bgsschat-cn-admin", "bgsschat-cn-user",
+                        "bgsschat-global-admin", "bgsschat-global-user");
     }
 
     @Test
@@ -244,18 +283,20 @@ class ConfigurationFilesConsistencyTests {
         assertThat(local).as("local 档与 dev 档同为开发目标").isEqualTo(dev);
         assertThat(dev).as("dev 档若与基线全等，说明生产地址被误抄进了开发档").isNotEqualTo(baseline);
 
-        // 开发与生产地址相同的只剩平台自身（探本机 127.0.0.1）。SaaS 生产已迁华为云境外
-        // （admin=122.8.185.32 / user=122.8.178.143），开发仍在腾讯云，两档不再同机。
+        // 开发与生产地址相同的只剩平台自身（探本机 127.0.0.1）以及尚未登记主机的产品
+        // （统一占位 pending.invalid）。SaaS 生产已迁华为云境外，开发仍在腾讯云，两档不再同机。
         // 境外 Redis 其实也是 dev / prod 同机，但两档的条目 id 不同（redis-dev / redis-global），
         // 因此不会落进这个按 id 比对的集合里。
         Set<String> sharedAddresses = baseline.entrySet().stream()
                 .filter(entry -> entry.getValue().equals(dev.get(entry.getKey())))
                 .map(Map.Entry::getKey)
                 .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
-        assertThat(sharedAddresses).containsExactly("healthcheck-platform");
+        List<String> allowedShared = Stream.concat(Stream.of("healthcheck-platform"), PENDING_APP_IDS.stream())
+                .toList();
+        assertThat(sharedAddresses).containsExactlyElementsOf(allowedShared);
     }
 
-    /** 该文件应当有的完整 id 清单：19 条应用 + 本环境的中间件与数据库。 */
+    /** 该文件应当有的完整 id 清单：37 条应用 + 本环境的中间件与数据库。 */
     private static List<String> expectedIds(String file) {
         List<String> infra = List.of(MAIN, PROD).contains(file) ? EXPECTED_PROD_INFRA_IDS : EXPECTED_DEV_INFRA_IDS;
         return Stream.concat(EXPECTED_APP_IDS.stream(), infra.stream()).toList();

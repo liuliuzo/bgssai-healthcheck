@@ -416,9 +416,15 @@ public class HealthReportService {
                 3. 顶层没有状态字段时会再往 `result` / `data` 下沉一层：BGSSAI 各仓把健康负载包在自己的统一响应
                    封装里，封装的 `code` / `success` 表达的是「接口调用成功」，与健康无关。
 
+                ### 探活成功不等于业务可用
+
+                - 就绪探针 `/bgssai/health/readiness` 为 `UP`，只表示进程活着、且 critical 依赖（`db` / `mybatis`）通了。
+                - 它不证明登录、短信、模型、支付或任何业务路径能走通，也不能当成产品已就绪。
+                - Redis / Elasticsearch 挂了，就绪探针照样可以返回 `UP`（见下一节）。看板一片绿只说明探活过了。
+
                 ### 为什么中间件与数据库要单独直连探测
 
-                - 9 个产品共 18 个后端，巡检地址统一为 `/bgssai/health/readiness`（Standards §13.7）。
+                - 产品后端巡检地址统一为 `/bgssai/health/readiness`（Standards §13.7）。
                 - 但按 Standards §13.2，就绪探针**只由 critical 组件决定结论**，而 critical 只有 `db` 与 `mybatis`；
                   Redis、Elasticsearch 这类依赖一律非 critical，既不参与判定、**也不在就绪端点被检查**。
                   也就是说 Redis 挂了，应用的就绪探针照样返回 `UP`。
@@ -430,7 +436,7 @@ public class HealthReportService {
 
                 ### 其它需要知道的事实
 
-                - 18 条产品后端一律 `critical=false`：本平台自身的 `/actuator/health` 只该反映「平台还能不能巡检」，
+                - 产品后端一律 `critical=false`：本平台自身的 `/actuator/health` 只该反映「平台还能不能巡检」，
                   不该因为某个下游挂了就对外报 DOWN，否则编排系统会去重启这个本来正常的平台。
                 - 这些目标按机器 IP 直连 HTTPS，而证书签给的是业务域名，握手会因主机名不匹配失败，
                   因此打开了 `skip-tls-verification`；Elasticsearch 三台实例是自签证书，同理。

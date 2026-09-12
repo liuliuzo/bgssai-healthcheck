@@ -17,7 +17,7 @@
              th:src="@{/brand/bgss-mark-tile.png}" alt=""/>
         <div>
             <h1 class="topbar__title">BGSSAI 健康巡检</h1>
-            <p class="topbar__subtitle">周期性调用各应用的健康检查接口，汇总展示运行状态</p>
+            <p class="topbar__subtitle">周期性调用各应用的健康检查接口，汇总展示运行状态。探活成功不等于业务可用。</p>
         </div>
     </div>
     <div class="topbar__actions">
@@ -91,6 +91,8 @@
                 <span class="stat__value" th:text="${s.unknown}">0</span>
             </article>
         </section>
+
+        <p class="probe-caveat">探活成功不等于业务可用。就绪探针只证明进程与关键依赖还在，不表示登录、支付或其它业务路径能走通。</p>
 
         <p class="empty" th:if="${dashboard.groups.isEmpty()}">
             还没有配置被监控的目标。请在 <code>application.properties</code> 的

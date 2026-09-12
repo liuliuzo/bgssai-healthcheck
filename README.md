@@ -23,6 +23,10 @@ BGSSAI 产品线按下面八条划分职责，各仓实现与文档不得与此�
 
 巡检各应用的健康接口，并直连数据库与中间件，用一个服务端渲染的看板集中展示。
 
+**探活成功不等于业务可用。** 就绪探针只回答「进程在、关键依赖（库 / MyBatis）通」，
+不证明登录、支付、短信、模型调用或任何业务路径能走通。看板一片绿，只说明探活过了，
+不能当成产品已就绪。
+
 - **Java 21** + **Spring Boot 4.1.0**
 - 前端使用 Spring Boot 自带的 **Thymeleaf** 模板引擎，无需 Node 工具链，页面资源全部内置
 - 五类被监控目标：HTTP 健康接口、Elasticsearch、Redis、MySQL、TCP 端口
@@ -225,32 +229,39 @@ MySQL 的辅助查询（版本、连接数、库清单）失败时**不会**把�
 
 ### 巡检 BGSSAI 产品线应用
 
-9 个产品 × 管理端 / 用户端共 18 个后端，巡检地址统一为 `/bgssai/health/readiness`（Standards §13.7）。
-巡检目标已按真实地址列全并启用，四份配置文件各写一份完整清单：
+**探活成功不等于业务可用。** `/bgssai/health/readiness` 为 UP，只表示进程活着、且 critical
+依赖（`db` / `mybatis`）通了。它不覆盖 Redis / Elasticsearch、登录、短信、模型、支付、
+页面能否打开，更不表示用户能完成一笔业务。排障时绿灯只能当「机器还在」，不能当验收通过。
+
+产品后端巡检地址统一为 `/bgssai/health/readiness`（Standards §13.7）。已部署的 9 个产品
+（blog / builder / geo-cn / geo-global / marklens / publish / saas / voiceunion / vpn）
+按真实地址启用；long / media / office / bgsschat（境内 + 境外）以及 short / note / tokenhub
+已写入清单，主机未登记前 `enabled=false`，避免对占位地址误报 DOWN。登记主机后改 url、打开
+enabled 即可。四份配置文件各写一份完整清单：
 
 | 文件 | 生效条件 | 巡检目标 | 条数 |
 |---|---|---|---|
-| `src/main/resources/application.properties` | 不指定 profile（默认档） | 生产（华为云-境内-上海一 + 华为云-境外） | 25 |
-| `src/main/resources/application-prod.properties` | `SPRING_PROFILES_ACTIVE=prod` | 同上，与主配置逐条一致 | 25 |
-| `src/main/resources/application-dev.properties` | `SPRING_PROFILES_ACTIVE=dev` | 开发（华为云-境外-墨西哥二 + 腾讯云） | 22 |
-| `src/main/resources/application-local.properties` | `SPRING_PROFILES_ACTIVE=local` | 同 dev，笔记本本机启动用 | 22 |
+| `src/main/resources/application.properties` | 不指定 profile（默认档） | 生产（华为云-境内-上海一 + 华为云-境外） | 44 |
+| `src/main/resources/application-prod.properties` | `SPRING_PROFILES_ACTIVE=prod` | 同上，与主配置逐条一致 | 44 |
+| `src/main/resources/application-dev.properties` | `SPRING_PROFILES_ACTIVE=dev` | 开发（华为云-境外-墨西哥二 + 腾讯云） | 40 |
+| `src/main/resources/application-local.properties` | `SPRING_PROFILES_ACTIVE=local` | 同 dev，笔记本本机启动用 | 40 |
 
-清单分两段：前 19 条是 `[0]` 平台自身 + `[1]`..`[18]` 十八个后端，四份文件完全相同；后面是中间件与
+清单分两段：前 37 条是 `[0]` 平台自身 + `[1]`..`[36]` 三十六个后端，四份文件完全相同；后面是中间件与
 数据库——生产两地各一套（`mysql-cn` / `mysql-global` / `redis-cn` / `redis-global` /
-`elasticsearch-cn` / `elasticsearch-global`），开发只有境外一套（`mysql-dev` / `redis-dev` /
+`elasticsearch-cn` / `elasticsearch-global`）外加云电脑宿主，开发只有境外一套（`mysql-dev` / `redis-dev` /
 `elasticsearch-dev`），所以 prod 家族与 dev 家族的条数本就不同。
 
-**主配置自带整份基线，因此 `java -jar app.jar` 不带 profile 也能看到 25 个目标**，看板不再显示
+**主配置自带整份基线，因此 `java -jar app.jar` 不带 profile 也能看到完整目标清单**，看板不再显示
 「还没有配置被监控的目标」；Jenkins 部署仍注入 `--spring.profiles.active=<env>`，命中哪一档就整份
 换成那一档的地址。
 
 **为什么四份文件各写一遍，而不是主配置写公共部分、profile 只写差异**：Spring Boot 绑定集合时
 **不跨 property source 合并**，只从优先级最高的那个源整份取。profile 文件优先级高于主配置，一旦
-它出现 `applications` 键，主配置那份就整份失效；此时 profile 文件若只写 `[1..18]`、指望 `[0]` 从
+它出现 `applications` 键，主配置那份就整份失效；此时 profile 文件若只写后面几条、指望 `[0]` 从
 主配置补上，绑定器会在下标 0 处遇到空洞并抛「left unbound」启动失败。代价是同一批目标在四个文件
 里各有一份，改一处忘一处既没有编译期报错也没有启动期报错，只会在切换 profile 后悄悄探测到过时的
 地址——所以由 `ConfigurationFilesConsistencyTests` 守护：主配置与 prod 档、local 档与 dev 档必须
-逐条一致，四份文件的前 19 条与顺序必须相同，每份都必须覆盖到数据库、Redis 与 Elasticsearch，
+逐条一致，四份文件的前 37 条与顺序必须相同，每份都必须覆盖到数据库、Redis 与 Elasticsearch，
 凭据与证书开关也要配齐，任一条对不上 `./mvnw test`（部署构建同样会跑）直接失败。
 
 注意 `detail.*` / `redis.*` / `mysql.*` 这些阈值是**标量键**，Spring Boot 跨 property source 是逐键
@@ -259,7 +270,7 @@ MySQL 的辅助查询（版本、连接数、库清单）失败时**不会**把�
 
 三个决定 URL 长相的事实，改地址前务必知道：
 
-1. **端口是 8080、协议是 HTTP**。18 个后端在 local / dev / test / prod 都是 `server.port=8080`，Spring SSL 关闭。user / admin 分开部署或本机交替启动，两端同一端口。
+1. **端口是 8080、协议是 HTTP**。产品后端在 local / dev / test / prod 都是 `server.port=8080`，Spring SSL 关闭。user / admin 分开部署或本机交替启动，两端同一端口。
 2. **用公网 IP**。境内华为云私网是 `172.31.x`、境外是 `192.168.0.x`，属两个不同区域 / VPC，一台机器
    走不通对面私网。只有公网 IP 这一套能同时覆盖两地。本平台部署在境内
    `123.60.68.201`（私网 `172.31.6.116`），与生产档 14 条境内条目同属 `172.31.x`，**想省公网流量可把
@@ -273,7 +284,7 @@ MySQL 的辅助查询（版本、连接数、库清单）失败时**不会**把�
 
 `bgssai.healthcheck.probe.skip-tls-verification`（全局默认，出厂 `false`）与每条目的
 `applications[n].skip-tls-verification`（覆盖全局）控制是否放开证书链与主机名校验。当前四份配置文件
-里 18 条产品后端都显式打开了它。
+里已部署的产品后端都显式打开了它。
 
 **放开的只是本平台这一个出站客户端**，用一个仅供该目标使用的 `SSLContext`，不碰 JVM 全局默认值，
 不影响本平台的其它请求，更不改任何被监控应用的配置。安全影响也有限：三个健康端点本就是公开的
@@ -290,12 +301,12 @@ MySQL 的辅助查询（版本、连接数、库清单）失败时**不会**把�
 503：存活探针在数据库不通时照样返回 200，用它巡检等于自欺；全量报告 `/bgssai/health` 信息更全但最坏
 耗时更长，适合人工排障。
 
-这 18 条一律 **`critical: false`**——本平台自己的 `/actuator/health` 只该反映「平台还能不能巡检」，
+产品后端一律 **`critical: false`**——本平台自己的 `/actuator/health` 只该反映「平台还能不能巡检」，
 不该因为某个下游应用挂了就对外报 DOWN，否则编排系统会去重启这个本来正常的平台。
 
 ## 中间件与数据库为什么要单独直连探
 
-18 个产品后端的巡检地址是就绪探针 `/bgssai/health/readiness`，而按 Standards §13.2，
+产品后端的巡检地址是就绪探针 `/bgssai/health/readiness`，而按 Standards §13.2，
 **就绪探针只由 critical 组件决定结论**，critical 只有 `db` 与 `mybatis`；Redis、Elasticsearch
 这类依赖一律非 critical，既不参与判定、**也不在就绪端点被检查**。换句话说 Redis 挂了，
 应用的就绪探针照样返回 `UP`，看板上一片绿。
@@ -585,7 +596,7 @@ stdout 档的 `<logger>` 指向本仓包名。改日志配置时它是拦住「�
 
 ## 日志
 
-与产品线其余 9 个仓（18 个后端）同一套口径，没有本平台专属的写法：
+与产品线各仓同一套口径，没有本平台专属的写法：
 
 | 档 | `logging.config` | 落点 |
 | --- | --- | --- |
@@ -672,9 +683,9 @@ src/main/java/com/bgssai/healthcheck/
     └── ViewFormatter.java                   # 页面格式化
 
 src/main/resources/
-├── application.properties          # 巡检行为阈值 + 基线 25 个巡检目标（= 生产，不指定 profile 时生效）
-├── application-prod.properties     # 生产 25 个巡检目标（与主配置逐条一致）
-├── application-dev.properties      # 开发 22 个巡检目标
+├── application.properties          # 巡检行为阈值 + 基线巡检目标（= 生产，不指定 profile 时生效）
+├── application-prod.properties     # 生产巡检目标（与主配置逐条一致）
+├── application-dev.properties      # 开发巡检目标
 ├── application-local.properties    # 本机启动，目标同 dev
 ├── log/logback-spring_file.xml     # dev / local / prod：落 /opt/bgssai/log + 控制台
 ├── log/logback-spring_stdout.xml   # test：只打控制台

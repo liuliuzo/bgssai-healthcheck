@@ -43,15 +43,15 @@ BGSSAI 产品线按下面八条划分职责，各仓实现与文档不得与此�
 | 分支 | 用途 | 发布环境 |
 | --- | --- | --- |
 | `feature/*` | Agent / 开发者的工作分支 | 不直接发布 |
-| `develop` | 集成分支（默认分支） | 开发环境 |
+| `develop` | 集成分支（默认分支） | 开发环境、生产环境 |
 | `release` | 测试冻结 | 测试环境 |
-| `master` | 生产冻结 | 生产环境 |
+| `master` | 生产冻结（晋升保留） | 当前不作为部署源 |
 
 - **AI Agent 必须先创建自己的 feature 分支再改文件**；禁止直接在 `develop` / `release` / `master` / `main` 上改。
 - **多 Agent 并行：各自开独立工作目录（git worktree）**。grok-build、Claude Code、codex、cursor、gemini 会同时在同一个工作区（`Desktop/github`）上干活，而主工作区的工作树与 HEAD 是共用的——别人 `checkout` 一次就把你的 HEAD 带走，你的提交会落到别人的分支上。**接到任务先在仓库目录之外建一个独立 worktree**（形如 `github/.<工具名>-worktrees/<任务名>/<仓名>`），在里面开自己的 `feature/*` 分支，各管各的；**合并成功后把这个工作文件夹删掉**（`git worktree remove`）。实在要在主工作区改，每次写文件前先 `git branch --show-current` 确认自己还在自己的分支上。
 - **别人的活不要碰**。grok-build、Claude Code、codex、cursor、gemini 各自的分支、worktree 和未合并的改动，不是自己的就不要去管——不要替别人提交、合并、改分支或删目录，**除非用户明确下达命令**。看到别人留下的半成品，报告即可，不要顺手处理。
 - Feature 合入 **`develop`**（先开 PR）。`develop` → `release`、`release` → `master` 的晋升同样先开 PR。
-- 开发环境发布 **`develop`**；测试环境发布 **`release`**；生产环境发布 **`master`**。
+- **部署源码（强制，现阶段）**：dev 开发环境与 prod 生产环境都部署 **`develop`**，只换 `application-dev.properties` / `application-prod.properties`（及 `sql/<env>/`）；测试环境仍发布 **`release`**。原因：当前版本不稳定，只走 `develop` 才能快速修问题并上线。禁止把生产部署或建库指到 `master`。待版本稳定后再恢复 prod 部署 `master`。
 - 用户明确同意合并或直接要求合并时，可以执行指定 PR 的合并，无需再次询问。
 - 用户未明确同意且未提出合并要求时，不得合并、开启 auto-merge，或直接推送到 `develop`、`release`、`master`、`main`、`Master` 等受保护分支。
 - 合并前必须确认仓库、源分支、目标分支和待合并 commit；授权仅限用户指定的 PR 或分支，不得扩展到其他 PR 或分支。

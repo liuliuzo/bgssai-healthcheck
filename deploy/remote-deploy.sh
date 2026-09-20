@@ -115,10 +115,9 @@ fi
 #   EnvironmentFile=-/etc/bgssai/<SERVICE_NAME>.env
 # 前缀 `-` 表示文件不存在就忽略，故对不用它的服务完全无副作用、也无需任何额外配置。
 #
-# 本产品线现行口径是**凭证明文写进 properties、随仓库与 jar 分发**（开发期取舍，见各产品仓
-# docs/security 的「临时开发期明文凭证政策」与 deploy/README.md），所以这个文件**平时不需要
-# 存在**，不是配置的正常落点。它只是一个逃生舱：想临时覆盖某一项而不重新构建时（例如轮换
-# 密钥后先改文件再 systemctl restart）才用得上。
+# 普通配置随各环境 properties 与 jar 分发；需在运行时注入或覆盖的配置由本文件提供。
+# 各产品的凭据存放政策以本产品 docs/security 与 deploy/README.md 为准，
+# 共享脚本不要求将凭据写入 Git。没有运行时覆盖项的服务可不创建此文件。
 # 内容是 KEY=VALUE，键名用 Spring Boot 的 relaxed binding 形式，例如
 # app.file.storage.obs-access-key 写作 APP_FILE_STORAGE_OBS_ACCESS_KEY；环境变量优先级高于
 # jar 内 properties。
@@ -152,7 +151,7 @@ ensure_service() {
   # 因为 Spring Boot 要跑到 context refresh 才失败（Tomcat 起、Druid 初始化完，约 10 秒），
   # 加 RestartSec=5 后一个周期约 15 秒 > 10 秒窗口，burst 计数每轮清零，条件永远不满足。
   # bgssai-vpn-admin 就这样以约 65% 单核的开销空转了三小时、重启 727 次，还把 journal 刷满，
-  # 挤掉了 dev-collect-logs 那 24 小时窗口里的有用历史。
+  # 挤掉了 collect-all logs(dev) 那 24 小时窗口里的有用历史。
   desired="$(cat <<UNIT
 [Unit]
 Description=${APP_NAME} (auto-provisioned by deploy)
@@ -166,7 +165,7 @@ Type=simple
 User=root
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=-${CREDENTIALS_ENV_FILE}
-ExecStart=${java_bin} -jar ${TARGET_JAR} --spring.profiles.active=${APP_PROFILE}
+ExecStart=${java_bin} -jar ${TARGET_JAR} --spring.profiles.active=${APP_PROFILE} --server.port=${APP_PORT}
 SuccessExitStatus=143
 Restart=on-failure
 RestartSec=5
@@ -440,6 +439,28 @@ if [[ "${AUTO_PROVISION}" == "true" ]]; then
       exit 1
     fi
     log "auto-provision service failed; will still attempt restart with existing unit"
+  fi
+fi
+
+# 官网用户端：在重启前准备安装包公开目录（可同步 BGSSAI_DOWNLOADS_SOURCE）。
+# 缺文件只 WARNING，绝不造假包，也不阻断部署。
+if [[ "${APP_NAME}" == *website-user* ]]; then
+  PUBLISH_SCRIPT="${APP_DIR}/publish-downloads.sh"
+  if [[ -f "${PUBLISH_SCRIPT}" ]]; then
+    log "running publish-downloads.sh before restart (non-blocking on missing installers)"
+    if ! bash "${PUBLISH_SCRIPT}"; then
+      log "WARNING: publish-downloads.sh exited non-zero; installer dirs may be incomplete"
+    fi
+  else
+    log "WARNING: ${PUBLISH_SCRIPT} missing; mkdir fallback for download dirs"
+    case "${APP_PROFILE}" in
+      prod)
+        mkdir -p /data/bgssai/website/downloads/bot /data/bgssai/website/downloads/build || true
+        ;;
+      *)
+        mkdir -p /opt/bgssai/website/downloads/bot /opt/bgssai/website/downloads/build || true
+        ;;
+    esac
   fi
 fi
 

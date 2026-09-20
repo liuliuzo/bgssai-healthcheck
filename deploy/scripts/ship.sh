@@ -7,7 +7,7 @@
 #   SSHPASS       SSH 登录密码（sshpass -e 从此变量读取，不进入命令行历史/进程参数）
 #   SSH_USER      SSH 登录用户
 #   SSH_HOST      目标服务器地址
-#   APP_NAME      应用名（bgssai-builder-user / bgssai-builder-admin）
+#   APP_NAME      应用名（bgssai-web-user / bgssai-web-admin）
 #   APP_DIR       服务器上的部署目录
 #   SERVICE_NAME  服务名（默认 systemctl 重启的服务名）
 #   APP_PORT      应用端口（用于健康检查）
@@ -573,6 +573,12 @@ retry_transient '上传 jar' upload "${JAR_LOCAL}" "${STAGED_REMOTE}" jar
 
 retry_transient '上传 remote-deploy.sh' upload "${REMOTE_DEPLOY_SRC}" "${APP_DIR}/remote-deploy.sh" remote-deploy.sh
 
+# 官网用户端：同步安装包发布脚本到目标机，供 remote-deploy 在重启前调用。
+PUBLISH_DOWNLOADS_SRC="${SCRIPT_DIR}/publish-downloads.sh"
+if [[ "${APP_NAME}" == *website-user* && -f "${PUBLISH_DOWNLOADS_SRC}" ]]; then
+  retry_transient '上传 publish-downloads.sh' upload "${PUBLISH_DOWNLOADS_SRC}" "${APP_DIR}/publish-downloads.sh" publish-downloads.sh
+fi
+
 # 完整性校验的一半在这里、一半在远端：本地算出 sha256 一并传过去，remote-deploy.sh 在**替换 jar
 # 之前**比对暂存文件。走 --inplace 续传时暂存文件会被多次尝试反复改写，必须有一道明确的关口保证
 # 「拿去替换的就是本次构建的那个 jar」，而不是某次半截传输留下的混合体。
@@ -585,8 +591,11 @@ else
 fi
 
 # 逐值转义每个环境变量后再拼进远端命令，任意值含空格 / 引号都不会破坏解析或注入。
-remote_cmd="$(printf 'APP_NAME=%q APP_DIR=%q SERVICE_NAME=%q APP_PORT=%q HEALTH_PATH=%q HEALTH_SCHEME=%q RESTART_CMD=%q HEALTH_TIMEOUT_SECONDS=%q APP_PROFILE=%q BUILD_ID=%q STAGED_SHA256=%q bash %q' \
-  "${APP_NAME}" "${APP_DIR}" "${SERVICE_NAME}" "${APP_PORT}" "${HEALTH_PATH}" "${HEALTH_SCHEME}" "${RESTART_CMD}" "${HEALTH_TIMEOUT_SECONDS}" "${APP_PROFILE}" "${BUILD_ID}" "${STAGED_SHA256}" "${APP_DIR}/remote-deploy.sh")"
+# BGSSAI_DOWNLOADS_* 可选：由 Jenkins / 运维注入，供 publish-downloads.sh 同步真实安装包。
+remote_cmd="$(printf 'APP_NAME=%q APP_DIR=%q SERVICE_NAME=%q APP_PORT=%q HEALTH_PATH=%q HEALTH_SCHEME=%q RESTART_CMD=%q HEALTH_TIMEOUT_SECONDS=%q APP_PROFILE=%q BUILD_ID=%q STAGED_SHA256=%q BGSSAI_DOWNLOADS_DIR=%q BGSSAI_BOT_DOWNLOAD_DIR=%q BGSSAI_BUILD_DOWNLOAD_DIR=%q BGSSAI_DOWNLOADS_SOURCE=%q bash %q' \
+  "${APP_NAME}" "${APP_DIR}" "${SERVICE_NAME}" "${APP_PORT}" "${HEALTH_PATH}" "${HEALTH_SCHEME}" "${RESTART_CMD}" "${HEALTH_TIMEOUT_SECONDS}" "${APP_PROFILE}" "${BUILD_ID}" "${STAGED_SHA256}" \
+  "${BGSSAI_DOWNLOADS_DIR:-}" "${BGSSAI_BOT_DOWNLOAD_DIR:-}" "${BGSSAI_BUILD_DOWNLOAD_DIR:-}" "${BGSSAI_DOWNLOADS_SOURCE:-}" \
+  "${APP_DIR}/remote-deploy.sh")"
 
 # 这一步刻意**不设**墙钟上限：远端正在停服务、换 jar、重启、等健康检查（最长 HEALTH_TIMEOUT_SECONDS，
 # 失败还要再走一轮回滚）。从客户端把它拦腰砍断，会让目标机停在一个谁也说不清的中间态 —— 比多等一会儿

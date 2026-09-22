@@ -1,5 +1,7 @@
 # bgssai-healthcheck
 
+> **已迁入官网（2026-09-22）**：巡检引擎、探针、告警与全部单元测试已搬到 [bgssai-website](https://github.com/liuliuzo/bgssai-website) 的 `bgssai-website-user` 模块 `com.bgssai.website.status` 包；公开状态页 `https://www.bgssai.com/status/`，内部看板 `/status/internal`（按 IP 放行）。本仓不再单独部署、不再演进，仅作历史留档。
+
 ## 产品线规划（全线统一）
 
 产品线职责与名称以[骨架仓产品线愿景](https://github.com/liuliuzo/bgssai-skeleton/blob/develop/docs/PRODUCT-LINE-VISION.md)为唯一权威；验收范围见[产品线验收基线](https://github.com/liuliuzo/bgssai-skeleton/blob/develop/docs/feature/product-line-acceptance.md)。本仓现行需求、原型、设计和实现保留在本仓，不再复制整段全线规划。

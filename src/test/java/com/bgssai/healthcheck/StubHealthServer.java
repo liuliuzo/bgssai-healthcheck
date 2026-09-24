@@ -29,7 +29,7 @@ final class StubHealthServer implements AutoCloseable {
     /** BGSSAI 产品线形态一：健康负载包在 {code, message, success, result} 封装里（Standards §13.3）。 */
     private static final String WRAPPED_RESULT_DOWN = """
             {"code":"0","message":null,"success":true,\
-            "result":{"status":"DOWN","app":"bgssai-vpn-user","checked_at":"2026-07-31 10:24:05",\
+            "result":{"status":"DOWN","app":"bgssai-magic-user","checked_at":"2026-07-31 10:24:05",\
             "components":[{"name":"db","status":"DOWN"},{"name":"mybatis","status":"DOWN"}]}}""";
 
     /** Elasticsearch 的 _cluster/health：顶层 status 是集群颜色，指标全部平铺在同一层。 */

@@ -159,7 +159,7 @@ bgssai.healthcheck.applications[19].url=mysql://121.36.230.185:3306/
 bgssai.healthcheck.applications[19].username=root
 bgssai.healthcheck.applications[19].password=change-me
 bgssai.healthcheck.applications[19].expected-databases[0]=bgssai_blog
-bgssai.healthcheck.applications[19].expected-databases[1]=bgssai_vpn
+bgssai.healthcheck.applications[19].expected-databases[1]=bgssai_magic
 
 # Redis：password 就是 AUTH 的参数
 bgssai.healthcheck.applications[20].id=redis-cn
@@ -226,7 +226,7 @@ MySQL 的辅助查询（版本、连接数、库清单）失败时**不会**把�
 页面能否打开，更不表示用户能完成一笔业务。排障时绿灯只能当「机器还在」，不能当验收通过。
 
 产品后端巡检地址统一为 `/bgssai/health/readiness`（Standards §13.7）。已部署的 9 个产品
-（blog / builder / geo-cn / geo-global / marklens / publish / saas / voiceunion / vpn）
+（blog / web / geo-cn / geo-global / marklens / publish / saas / voiceunion / vpn）
 按真实地址启用；long / media / office / bgsschat（境内 + 境外）以及 short / note / tokenhub
 已写入清单，主机未登记前 `enabled=false`，避免对占位地址误报 DOWN。登记主机后改 url、打开
 enabled 即可。四份配置文件各写一份完整清单：

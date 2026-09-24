@@ -150,7 +150,7 @@ ensure_service() {
   # 不设限流时，一个启动期必崩的应用会永远重启下去：systemd 默认的 10 秒 5 次限流对它无效，
   # 因为 Spring Boot 要跑到 context refresh 才失败（Tomcat 起、Druid 初始化完，约 10 秒），
   # 加 RestartSec=5 后一个周期约 15 秒 > 10 秒窗口，burst 计数每轮清零，条件永远不满足。
-  # bgssai-vpn-admin 就这样以约 65% 单核的开销空转了三小时、重启 727 次，还把 journal 刷满，
+  # bgssai-magic-admin 就这样以约 65% 单核的开销空转了三小时、重启 727 次，还把 journal 刷满，
   # 挤掉了 collect-all logs(dev) 那 24 小时窗口里的有用历史。
   desired="$(cat <<UNIT
 [Unit]

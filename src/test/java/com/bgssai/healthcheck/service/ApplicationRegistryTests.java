@@ -159,12 +159,12 @@ class ApplicationRegistryTests {
     @DisplayName("expected-databases 只对 mysql 目标生效，配错地方直接启动失败")
     void expectedDatabasesOnlyApplyToMysql() {
         Target mysql = new Target("db", "db", "g", "mysql://db.internal:3306/", null, "GET", true, false, List.of(),
-                Map.of(), "root", "pw", null, null, List.of(), List.of("bgssai_blog", "bgssai_vpn"), null, null);
+                Map.of(), "root", "pw", null, null, List.of(), List.of("bgssai_blog", "bgssai_magic"), null, null);
         Target http = new Target("api", "api", "g", "http://a.internal/health", null, "GET", true, false, List.of(),
                 Map.of(), null, null, null, null, List.of(), List.of("bgssai_blog"), null, null);
 
         assertThat(registryOf(mysql).findAll().getFirst().expectedDatabases())
-                .containsExactly("bgssai_blog", "bgssai_vpn");
+                .containsExactly("bgssai_blog", "bgssai_magic");
 
         assertThatExceptionOfType(IllegalStateException.class).isThrownBy(() -> registryOf(http))
                 .withMessageContaining("只对 mysql 目标生效");

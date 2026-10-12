@@ -76,7 +76,7 @@ class ConfigurationFilesConsistencyTests {
             "publish-admin", "publish-user",
             "saas-admin", "saas-user",
             "voiceunion-admin", "voiceunion-user",
-            "vpn-admin", "vpn-user");
+            "magic-admin", "magic-user");
 
     /**
      * 已列入清单、主机尚未登记的产品后端。路径按 Standards §13.7 写成
@@ -86,8 +86,8 @@ class ConfigurationFilesConsistencyTests {
             "long-admin", "long-user",
             "media-admin", "media-user",
             "office-admin", "office-user",
-            "bgsschat-cn-admin", "bgsschat-cn-user",
-            "bgsschat-global-admin", "bgsschat-global-user",
+            "chat-cn-admin", "chat-cn-user",
+            "chat-global-admin", "chat-global-user",
             "short-admin", "short-user",
             "note-admin", "note-user",
             "tokenhub-cn-admin", "tokenhub-cn-user",
@@ -161,11 +161,11 @@ class ConfigurationFilesConsistencyTests {
             assertThat(target.critical()).isFalse();
         });
 
-        assertThat(PENDING_APP_IDS).as("探活清单必须覆盖 long / media / office / bgsschat")
+        assertThat(PENDING_APP_IDS).as("探活清单必须覆盖 long / media / office / chat")
                 .contains("long-admin", "long-user", "media-admin", "media-user",
                         "office-admin", "office-user",
-                        "bgsschat-cn-admin", "bgsschat-cn-user",
-                        "bgsschat-global-admin", "bgsschat-global-user");
+                        "chat-cn-admin", "chat-cn-user",
+                        "chat-global-admin", "chat-global-user");
     }
 
     @Test

@@ -219,7 +219,7 @@ class AlertServiceTests {
     void statusListsOngoingIncidentsOnly() {
         AlertService service = service(defaults().build());
         MonitoredApplication firing = app("blog-admin", false);
-        MonitoredApplication flapping = app("vpn-user", false);
+        MonitoredApplication flapping = app("magic-user", false);
 
         probe(service, firing, HealthState.DOWN);
         probe(service, firing, HealthState.DOWN);

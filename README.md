@@ -226,8 +226,8 @@ MySQL 的辅助查询（版本、连接数、库清单）失败时**不会**把�
 页面能否打开，更不表示用户能完成一笔业务。排障时绿灯只能当「机器还在」，不能当验收通过。
 
 产品后端巡检地址统一为 `/bgssai/health/readiness`（Standards §13.7）。已部署的 9 个产品
-（blog / web / geo-cn / geo-global / marklens / publish / saas / voiceunion / vpn）
-按真实地址启用；long / media / office / bgsschat（境内 + 境外）以及 short / note / tokenhub
+（blog / web / geo-cn / geo-global / marklens / publish / saas / voiceunion / magic）
+按真实地址启用；long / media / office / chat（境内 + 境外）以及 short / note / tokenhub
 已写入清单，主机未登记前 `enabled=false`，避免对占位地址误报 DOWN。登记主机后改 url、打开
 enabled 即可。四份配置文件各写一份完整清单：
 

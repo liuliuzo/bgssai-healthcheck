@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "date": "2026-10-17",
+  "repo": "liuliuzo/bgssai-healthcheck",
+  "local_repo": "bgssai-healthcheck",
+  "baseline": "67951a42791e8e8893c4e71c1868bdc63170f7b9",
+  "requirement_file": "docs/feature/opc-requirements-20261017.md",
+  "requirements": [
+    {
+      "id": "REQ-HEALTHCHECK-PRODUCT-001",
+      "title": "巡检迁移定位",
+      "cases": [
+        "TC-HEALTHCHECK-PRODUCT-001-P",
+        "TC-HEALTHCHECK-PRODUCT-001-N"
+      ],
+      "file": "docs/test/TC-opc-product-20261017.md"
+    },
+    {
+      "id": "REQ-HEALTHCHECK-PRODUCT-002",
+      "title": "探活与业务状态区分",
+      "cases": [
+        "TC-HEALTHCHECK-PRODUCT-002-P",
+        "TC-HEALTHCHECK-PRODUCT-002-N"
+      ],
+      "file": "docs/test/TC-opc-product-20261017.md"
+    }
+  ],
+  "cases": [
+    {
+      "id": "TC-HEALTHCHECK-PRODUCT-001-P",
+      "requirement": "REQ-HEALTHCHECK-PRODUCT-001",
+      "file": "TC-opc-product-20261017.md",
+      "status": "待测",
+      "kind": "P"
+    },
+    {
+      "id": "TC-HEALTHCHECK-PRODUCT-001-N",
+      "requirement": "REQ-HEALTHCHECK-PRODUCT-001",
+      "file": "TC-opc-product-20261017.md",
+      "status": "待测",
+      "kind": "N"
+    },
+    {
+      "id": "TC-HEALTHCHECK-PRODUCT-002-P",
+      "requirement": "REQ-HEALTHCHECK-PRODUCT-002",
+      "file": "TC-opc-product-20261017.md",
+      "status": "待测",
+      "kind": "P"
+    },
+    {
+      "id": "TC-HEALTHCHECK-PRODUCT-002-N",
+      "requirement": "REQ-HEALTHCHECK-PRODUCT-002",
+      "file": "TC-opc-product-20261017.md",
+      "status": "待测",
+      "kind": "N"
+    }
+  ],
+  "coverage": [
+    {
+      "source": "docs/feature/README.md",
+      "title": "功能需求",
+      "classification": "索引或模板，不作为独立业务功能",
+      "legacy": [],
+      "requirements": [],
+      "cases": []
+    }
+  ],
+  "historical_suites": [],
+  "progress": {
+    "待测": 4,
+    "通过": 0,
+    "失败": 0,
+    "阻塞": 0,
+    "不适用": 0
+  },
+  "suite_counts": {
+    "TC-opc-product-20261017.md": {
+      "待测": 4,
+      "通过": 0,
+      "失败": 0,
+      "阻塞": 0,
+      "不适用": 0
+    }
+  },
+  "design_only": true
+}

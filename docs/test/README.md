@@ -6,11 +6,11 @@
 | --- | --- |
 | [PROGRESS.md](./PROGRESS.md) | 测试进度。按功能汇总待测、通过、失败、阻塞、不适用 |
 | `TC-*.md` | 功能测试案例。一条功能一份，按验收标准展开 |
-| [TEMPLATE.md](./TEMPLATE.md) | 新案例模板 |
+| [功能测试模板](https://github.com/liuliuzo/bgssai-skeleton/blob/develop/docs/test/TEMPLATE.md) | 新案例模板 |
 
 ## 记录方式
 
-1. 复制 [TEMPLATE.md](./TEMPLATE.md)，保存为 `TC-<功能>.md`。
+1. 复制 [功能测试模板](https://github.com/liuliuzo/bgssai-skeleton/blob/develop/docs/test/TEMPLATE.md)，保存为 `TC-<功能>.md`。
 2. 执行后把每条用例的「结果」写成待测、通过、失败、阻塞或不适用。
 3. 同一天把汇总写回 [PROGRESS.md](./PROGRESS.md)。
 4. 案例里不写口令、Token、密钥或客户隐私。

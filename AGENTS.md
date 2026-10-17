@@ -1,5 +1,7 @@
 # AGENTS.md
 
+本仓工具指南只在 `AGENTS.md` 维护；`CLAUDE.md` 通过 `@AGENTS.md` 导入，不再保留正文副本。
+
 ## 产品线规划（全线统一）
 
 产品线职责与名称以[骨架仓产品线愿景](https://github.com/liuliuzo/bgssai-skeleton/blob/develop/docs/PRODUCT-LINE-VISION.md)为唯一权威；验收范围见[产品线验收基线](https://github.com/liuliuzo/bgssai-skeleton/blob/develop/docs/feature/product-line-acceptance.md)。本仓现行需求、原型、设计和实现保留在本仓，不再复制整段全线规划。
@@ -11,7 +13,6 @@
 
 **本仓位置**：巡检仓，非业务工具。
 
-> 本文件与 `CLAUDE.md` 内容保持一致（供不同 AI 工具各自读取），改一处必须同步改另一处。
 
 ## 仓库定位
 
@@ -62,4 +63,3 @@
 ## 向用户汇报（强制）
 
 用户不看、也看不懂修改细节。对用户**只汇报整体进度与结果**（做到哪一步、是否完成、要不要拍板）。执行过程中也不要在对话里复述改了什么，不要逐步播报文件或 diff。禁止输出文件清单、diff、命令日志、commit SHA、逐仓 PR 表、工具过程。需要时最多给一个链接。
-

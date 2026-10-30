@@ -30,6 +30,15 @@ APP_DIR="${APP_DIR:?APP_DIR is required}"
 SERVICE_NAME="${SERVICE_NAME:?SERVICE_NAME is required}"
 APP_PORT="${APP_PORT:?APP_PORT is required}"
 BUILD_ID="${BUILD_ID:?BUILD_ID is required}"
+# Explicit bind scoping supports separate loopback addresses on one host.
+# Fail closed for unsupported addresses instead of falling back to a port-wide kill.
+APP_BIND_ADDRESS="${APP_BIND_ADDRESS:-}"
+if [[ -n "${APP_BIND_ADDRESS}" ]] && ! [[ "${APP_BIND_ADDRESS}" =~ ^127\.0\.0\.([1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])$ ]]; then
+  echo 'APP_BIND_ADDRESS must be 127.0.0.1 through 127.0.0.254' >&2
+  exit 1
+fi
+HEALTH_HOST="${APP_BIND_ADDRESS:-127.0.0.1}"
+
 HEALTH_PATH="${HEALTH_PATH:-/bgssai/health/readiness}"
 # 健康检查协议：http（默认）或 https。应用自身跑 TLS（server.ssl.enabled=true）的部署须设 https，
 # 探测走 curl -k（自签/内部证书，本地回环，跳过证书校验的安全影响可忽略）。
@@ -190,6 +199,15 @@ UNIT
 
 # 列出当前监听 APP_PORT 的进程 PID（依次尝试 ss / lsof / fuser，取先可用者）。
 port_listener_pids() {
+  if [[ -n "${APP_BIND_ADDRESS:-}" ]]; then
+    local listeners
+    command -v ss >/dev/null 2>&1 || { echo 'APP_BIND_ADDRESS requires ss' >&2; return 1; }
+    listeners="$(ss -H -ltnp "sport = :${APP_PORT}")" || return 1
+    printf '%s\n' "${listeners}" | awk -v address="${APP_BIND_ADDRESS}" -v port="${APP_PORT}" \
+      '$4 == address ":" port || $4 == "[::ffff:" address "]:" port || $4 == "::ffff:" address ":" port || $4 == "[::ffff:0.0.0.0]:" port || $4 == "::ffff:0.0.0.0:" port || $4 == "0.0.0.0:" port || $4 == "*:" port || $4 == "[::]:" port || $4 == ":::" port' \
+      | grep -oP 'pid=\K[0-9]+' | sort -u || true
+    return 0
+  fi
   local pids=""
   if command -v ss >/dev/null 2>&1; then
     pids="$(ss -ltnp "sport = :${APP_PORT}" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u || true)"
@@ -236,7 +254,7 @@ foreign_owner_of_pid() {
 FOREIGN_PORT_HOLDER=""
 free_port() {
   local pids pid owner
-  pids="$(port_listener_pids)"
+  pids="$(port_listener_pids)" || return 1
   [[ -n "${pids// /}" ]] || return 0
   for pid in ${pids}; do
     if owner="$(foreign_owner_of_pid "${pid}")"; then
@@ -250,7 +268,7 @@ free_port() {
   kill ${pids} 2>/dev/null || true
   sleep 2
   # 兜底：个别进程未响应 TERM 仍占端口时，对「本服务」残留再补一刀。
-  pids="$(port_listener_pids)"
+  pids="$(port_listener_pids)" || return 1
   if [[ -n "${pids// /}" ]]; then
     kill -9 ${pids} 2>/dev/null || true
     sleep 1
@@ -262,7 +280,7 @@ free_port() {
 # （否则回滚分支会把对方的健康误当成自己的、误报「回滚成功」）。
 port_held_by_foreign() {
   local pids pid owner
-  pids="$(port_listener_pids)"
+  pids="$(port_listener_pids)" || { printf "socket inventory unavailable"; return 0; }
   [[ -n "${pids// /}" ]] || return 1
   for pid in ${pids}; do
     if owner="$(foreign_owner_of_pid "${pid}")"; then
@@ -300,14 +318,14 @@ probe_once() {
   if command -v curl >/dev/null 2>&1; then
     local code curl_opts=(-s -o /dev/null -w '%{http_code}' --max-time 5)
     [[ "${HEALTH_SCHEME}" == "https" ]] && curl_opts+=(-k)
-    code="$(curl "${curl_opts[@]}" "${HEALTH_SCHEME}://127.0.0.1:${APP_PORT}${HEALTH_PATH}" || true)"
+    code="$(curl "${curl_opts[@]}" "${HEALTH_SCHEME}://${HEALTH_HOST}:${APP_PORT}${HEALTH_PATH}" || true)"
     LAST_PROBE_DETAIL="curl http_code=${code:-<无响应>}"
     case "${code}" in
       2[0-9][0-9]|3[0-9][0-9]|401|403|404) return 0 ;;
       *) return 1 ;;
     esac
   else
-    if (exec 3<>"/dev/tcp/127.0.0.1/${APP_PORT}") 2>/dev/null; then
+    if (exec 3<>"/dev/tcp/${HEALTH_HOST}/${APP_PORT}") 2>/dev/null; then
       LAST_PROBE_DETAIL="tcp connect ok（无 curl，仅探端口）"
       return 0
     fi
@@ -330,7 +348,7 @@ probe_once() {
 dump_failure_diagnostics() {
   local phase="$1"
   log "----- 诊断信息（${phase}）begin -----"
-  log "最后一次健康探测: ${LAST_PROBE_DETAIL} (${HEALTH_SCHEME}://127.0.0.1:${APP_PORT}${HEALTH_PATH})"
+  log "最后一次健康探测: ${LAST_PROBE_DETAIL} (${HEALTH_SCHEME}://${HEALTH_HOST}:${APP_PORT}${HEALTH_PATH})"
 
   if command -v systemctl >/dev/null 2>&1; then
     # systemctl 在异常环境下（如容器内无 systemd）会输出多行，压成一行避免日志错行。
@@ -411,7 +429,7 @@ health_check() {
       return 1
     fi
     if probe_once; then
-      log "health ok at ${HEALTH_SCHEME}://127.0.0.1:${APP_PORT}${HEALTH_PATH}"
+      log "health ok at ${HEALTH_SCHEME}://${HEALTH_HOST}:${APP_PORT}${HEALTH_PATH}"
       return 0
     fi
     if unit_terminally_failed; then
@@ -425,7 +443,7 @@ health_check() {
     fi
     sleep 3
   done
-  log "health FAILED at ${HEALTH_SCHEME}://127.0.0.1:${APP_PORT}${HEALTH_PATH} within ${HEALTH_TIMEOUT_SECONDS}s"
+  log "health FAILED at ${HEALTH_SCHEME}://${HEALTH_HOST}:${APP_PORT}${HEALTH_PATH} within ${HEALTH_TIMEOUT_SECONDS}s"
   return 1
 }
 

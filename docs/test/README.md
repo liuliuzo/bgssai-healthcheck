@@ -32,3 +32,9 @@
 
 机器可读清单：[functional-manifest-20261017.json](functional-manifest-20261017.json)。管理仓 `scripts/validate-functional-docs.py --repo <本仓路径>` 检查需求/用例ID、正反例、状态、链接、覆盖及历史套件指纹；实际运行测试证据另行填写。
 <!-- OPC-VALIDATION-20261017 END -->
+
+## 2026-11-02 全仓扫描
+
+[扫描范围与关联](SCAN-20261102.json)。历史留档仓：巡检已迁至 bgssai-website；当前业务测试由官网负责，不新增独立部署验收。
+
+现行范围已有案例，本次仅补充可追溯的扫描目录，不重复新增历史功能。

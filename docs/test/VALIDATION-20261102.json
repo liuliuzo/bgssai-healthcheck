@@ -1,0 +1,27 @@
+{
+  "repo": "bgssai-healthcheck",
+  "source_sha": "d3558636fef1f9dc6e55d2699636ff6dc91320ca",
+  "baseline": {
+    "repo": "liuliuzo/bgssai-healthcheck",
+    "requirements": 2,
+    "new_cases": 4,
+    "source_files": 1,
+    "historical_suites": 0,
+    "historical_duplicate_ids": [],
+    "status": "PASS",
+    "errors": []
+  },
+  "current": {
+    "repo": "liuliuzo/bgssai-healthcheck",
+    "requirements": 2,
+    "new_cases": 4,
+    "source_files": 1,
+    "historical_suites": 0,
+    "historical_duplicate_ids": [],
+    "status": "PASS",
+    "errors": []
+  },
+  "introduced_errors": [],
+  "scope": "功能用例与扫描目录补充；不修改产品业务接口、原型、历史用例结果和历史指纹。",
+  "new_suite_validation": "PASS"
+}

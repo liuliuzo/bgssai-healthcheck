@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "date": "2026-11-02",
+  "repo": "bgssai-healthcheck",
+  "source_sha": "d3558636fef1f9dc6e55d2699636ff6dc91320ca",
+  "features": [
+    {
+      "source": "docs/feature/opc-requirements-20261017.md",
+      "title": "bgssai-healthcheck：OPC规划功能需求与验收补充",
+      "classification": "现有/补充案例设计映射；执行结果独立记录",
+      "cases": [
+        "TC-HEALTHCHECK-PRODUCT-001-N",
+        "TC-HEALTHCHECK-PRODUCT-001-P",
+        "TC-HEALTHCHECK-PRODUCT-002-N",
+        "TC-HEALTHCHECK-PRODUCT-002-P"
+      ],
+      "legacy": []
+    },
+    {
+      "source": "docs/feature/README.md",
+      "title": "功能需求",
+      "classification": "目录索引/模板，不作为独立能力",
+      "cases": [],
+      "legacy": []
+    }
+  ],
+  "source_scan": {
+    "entrypoints": [
+      "README.md",
+      "docs/feature/opc-requirements-20261017.md"
+    ],
+    "reviewed": [
+      "README.md",
+      "docs/feature/opc-requirements-20261017.md"
+    ],
+    "limitations": [
+      "历史留档仓：巡检已迁至 bgssai-website；当前业务测试由官网负责，不新增独立部署验收。",
+      "需求与源码入口扫描不等于逐分支穷尽覆盖；未执行真实环境业务验收。"
+    ]
+  }
+}

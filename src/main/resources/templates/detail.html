@@ -41,7 +41,7 @@
         </section>
 
         <section class="detail__section">
-            <h3 class="detail__subtitle">统计（自平台本次启动以来）</h3>
+            <h3 class="detail__subtitle">运行统计</h3>
             <table class="detail__table">
                 <tbody>
                 <tr><th>累计探测</th><td th:text="${app.stats.totalChecks}">0</td></tr>
@@ -108,15 +108,14 @@
 
             <pre class="detail__body" th:if="${raw.hasBody()}"><code
                     th:text="${fmt.prettyJson(raw.body)}">响应正文</code></pre>
-            <p class="detail__note" th:if="${raw.truncated}">正文已按 detail.max-body-chars 截断。</p>
-            <p class="detail__note" th:if="${!raw.hasBody()}">对端没有返回正文。</p>
+            <p class="detail__note" th:if="${raw.truncated}">正文已截断</p>
+            <p class="detail__note" th:if="${!raw.hasBody()}">无响应正文</p>
         </section>
 
         <section class="detail__section" th:if="${app.hasRecoveredFailure()}"
                  th:with="fail=${app.lastFailure}, raw=${app.lastFailure.detail}">
             <h3 class="detail__subtitle"
                 th:text="'最近一次失败的原始应答（' + ${fmt.dateTime(fail.checkedAt)} + '）'">最近一次失败</h3>
-            <p class="detail__note">目标当前已恢复，这段是失败当时留下的现场。</p>
             <table class="detail__table">
                 <tbody>
                 <tr><th>当时判定</th><td th:text="${fail.state.label}">异常</td></tr>
@@ -134,7 +133,7 @@
         </section>
 
         <section class="detail__section" th:if="${!app.history.isEmpty()}">
-            <h3 class="detail__subtitle" th:text="'最近 ' + ${app.history.size()} + ' 次采样（由新到旧）'">最近采样</h3>
+            <h3 class="detail__subtitle" th:text="'最近 ' + ${app.history.size()} + ' 次采样'">最近采样</h3>
             <ul class="detail__history">
                 <li th:each="sample : ${fmt.reversed(app.history)}">
                     <span class="dot dot--sm" th:classappend="'is-' + ${sample.state.code}" aria-hidden="true"></span>

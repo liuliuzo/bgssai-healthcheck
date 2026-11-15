@@ -20,12 +20,13 @@
 
 ## 强制约定
 
-* 提交信息遵循 Conventional Commits。
-* **部署通道（强制）**：部署只走 Jenkins（本仓 `Jenkinsfile` / `jenkins/Jenkinsfile.stop`，仅手动触发）。不得用 GitHub Actions 做部署。部署失败不得自动重部署。
-* **AI 成本红线**：不得创建 PR 后会持续唤醒 AI 的 heartbeat / automation / 后台轮询；PR 状态仅在当前会话单次查询或用户下次交互时再查。
-* 一切产出物（代码 / 文档 / 提交信息 / PR 描述 / 评审与回信）**全局禁用 emoji 及装饰性图形符号**；语义性符号（→、×、§ 等）不属装饰性符号，允许使用。
-* 跨仓通用规范以骨架仓 `bgssai-skeleton` 的 `docs/BGSSAI-Standards.md` 为准；本仓不另立第二份规范副本。
-* 中间件连接参数只写各环境 `application-*.properties` 字面量，禁止 `${}` 占位符。
+- 提交信息遵循 Conventional Commits。
+- **部署通道（强制）**：部署只走 Jenkins（本仓 `Jenkinsfile` / `jenkins/Jenkinsfile.stop`，仅手动触发）。不得用 GitHub Actions 做部署。部署失败不得自动重部署。
+- **AI 成本红线**：不得创建 PR 后会持续唤醒 AI 的 heartbeat / automation / 后台轮询；PR 状态仅在当前会话单次查询或用户下次交互时再查。
+- 一切产出物（代码 / 文档 / 提交信息 / PR 描述 / 评审与回信）**全局禁用 emoji 及装饰性图形符号**；语义性符号（→、×、§ 等）不属装饰性符号，允许使用。
+- **去说明化与纯功能表达（强制）**：信息系统（含前端/客户端界面、HTML 原型、接口提示）与项目文档一律禁写解释性、说明类或设计类文案；功能模块只保留数据展示与操作控件，不写用途副标题、新手引导卡、业务机制长段说教或内部契约/字段/存储键细节；文档直陈规则、契约与命令，不写背景铺陈。详见 `bgssai-skeleton/docs/BGSSAI-Standards.md` §0 与 §16。
+- 跨仓通用规范以骨架仓 `bgssai-skeleton` 的 `docs/BGSSAI-Standards.md` 为准；本仓不另立第二份规范副本。
+- 中间件连接参数只写各环境 `application-*.properties` 字面量，禁止 `${}` 占位符。
 
 ## Git 分支（Git Flow，强制）
 
@@ -52,13 +53,7 @@
 
 ## 端口约定（强制）
 
-所有 web 项目的 **dev / test / prod 三个环境，服务端口一律 8080**，不按环境换端口。
-
-换端口的代价不在改配置本身：部署脚本、反向代理、健康检查、前端开发代理各要记一套，
-而这几处记错都不会在开发时暴露，要等上线才发现。统一成一个值，这类错就不存在。
-
-本机要同时跑两个服务而必须错开时，用启动参数临时改
-（`--server.port=8081`），不要写进 `application-<profile>.properties`。
+所有 web 项目的 **dev / test / prod 三个环境，服务端口一律 8080**，不按环境换端口。本机同时启动多个服务时通过启动参数临时指定（`--server.port=8081`），禁止写入 `application-<profile>.properties`。
 
 ## 向用户汇报（强制）
 

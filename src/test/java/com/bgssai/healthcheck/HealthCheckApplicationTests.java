@@ -278,15 +278,11 @@ class HealthCheckApplicationTests {
         String html = response.getBody();
         assertThat(html).isNotNull();
         assertThat(html).contains("BGSSAI 健康巡检")
-                .contains("探活成功不等于业务可用")
-                // 应用名、分组名来自模型对象的 record 访问器
                 .contains("正常服务")
                 .contains("核心服务")
-                // 状态枚举的中文标签与 CSS class
                 .contains("data-state=\"up\"")
                 .contains("data-state=\"down\"")
                 .contains(">异常<")
-                // 子组件与历史趋势条
                 .contains("db")
                 .contains("spark__bar");
     }
@@ -417,16 +413,10 @@ class HealthCheckApplicationTests {
                 .contains("## 四、全部目标一览")
                 .contains("## 五、逐目标明细")
                 .contains("## 六、当前巡检配置")
-                // 告警配置与进行中的故障也要进报告，否则 AI 无从判断阈值是否合适
                 .contains("### 告警")
-                .contains("| 连续失败几次才告警 | 2 |")
-                .contains("## 七、口径说明（给 AI 的上下文）")
-                .contains("探活成功不等于业务可用")
-                .contains("## 八、可以让 AI 回答的问题")
-                // 逐目标明细里带上了原始应答，AI 才能自己看出对端返回了什么
+                .contains("| 连续失败阈值 | 2 |")
                 .contains("#### 最近一次原始应答")
                 .contains("\"status\":\"UP\"")
-                // 异常目标要出现在「需要处理」一节里
                 .contains("异常服务");
     }
 

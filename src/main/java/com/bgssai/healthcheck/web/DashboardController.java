@@ -57,19 +57,13 @@ public class DashboardController {
         return "index :: dashboard";
     }
 
-    /**
-     * 单个目标的完整明细，含最近一次原始应答。
-     *
-     * <p>id 不存在时不抛出去：这个片段是弹窗内容，返回 500 会让前端只能显示一句
-     * 「加载失败」；渲染一行「目标不存在」更有信息量，也说明请求确实到达了后端。</p>
-     */
     @GetMapping("/fragments/apps/{id}/detail")
     public String detailFragment(@PathVariable String id, Model model) {
         try {
             model.addAttribute("app", this.healthCheckService.findById(id));
         }
         catch (UnknownApplicationException ex) {
-            model.addAttribute("error", "目标 " + id + " 不存在，可能是配置已经改过、页面还没刷新。");
+            model.addAttribute("error", "目标不存在：" + id);
         }
         return "detail :: detail";
     }

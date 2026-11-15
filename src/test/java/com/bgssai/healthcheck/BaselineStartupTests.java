@@ -34,7 +34,7 @@ class BaselineStartupTests {
         assertThat(this.dispatcher).as("探针分派器装配失败，说明有探针没被注册").isNotNull();
 
         assertThat(this.registry.findAll())
-                .as("默认档没有加载到目标，看板会显示「还没有配置被监控的目标」")
+                .as("默认档未加载到巡检目标")
                 .isNotEmpty();
 
         // 中间件与数据库必须在默认档里就存在：应用的就绪探针只由 critical 组件决定结论，

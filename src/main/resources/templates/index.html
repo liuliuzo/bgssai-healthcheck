@@ -17,7 +17,6 @@
              th:src="@{/brand/bgss-mark-tile.png}" alt=""/>
         <div>
             <h1 class="topbar__title">BGSSAI 健康巡检</h1>
-            <p class="topbar__subtitle">周期性调用各应用的健康检查接口，汇总展示运行状态。探活成功不等于业务可用。</p>
         </div>
     </div>
     <div class="topbar__actions">
@@ -29,11 +28,10 @@
         <span class="countdown" id="countdown" aria-live="polite"></span>
         <button type="button" class="btn btn--primary" id="refresh-now">立刻巡检</button>
         <a class="btn" href="https://www.bgssai.com/download/bot/" target="_blank"
-           rel="noopener noreferrer" title="打开 BGSSAI Bot 官方下载页">下载 Bot</a>
-        <a class="btn" th:href="@{/api/report.md}" download
-           title="下载 Markdown 报告，含每个目标的原始应答与当前巡检配置">下载报告</a>
+           rel="noopener noreferrer">下载 Bot</a>
+        <a class="btn" th:href="@{/api/report.md}" download>下载报告</a>
         <a class="btn btn--ghost" th:href="@{/api/report.md(download=false)}" target="_blank"
-           rel="noopener noreferrer" title="在浏览器里直接查看报告">预览报告</a>
+           rel="noopener noreferrer">预览报告</a>
         <button type="button" class="btn btn--icon" id="theme-toggle" title="切换深浅色主题"
                 aria-label="切换深浅色主题">◑</button>
     </div>
@@ -94,12 +92,7 @@
             </article>
         </section>
 
-        <p class="probe-caveat">探活成功不等于业务可用。就绪探针只证明进程与关键依赖还在，不表示登录、支付或其它业务路径能走通。</p>
-
-        <p class="empty" th:if="${dashboard.groups.isEmpty()}">
-            还没有配置被监控的目标。请在 <code>application.properties</code> 的
-            <code>bgssai.healthcheck.applications</code> 下添加应用及其健康检查地址。
-        </p>
+        <p class="empty" th:if="${dashboard.groups.isEmpty()}">暂无数据</p>
 
         <section class="group" th:each="group : ${dashboard.groups}">
             <header class="group__header">
@@ -118,7 +111,7 @@
                         <span class="dot" th:classappend="'is-' + ${app.state.code}" aria-hidden="true"></span>
                         <h3 class="card__title" th:text="${app.name}">目标名称</h3>
                         <span class="tag tag--type" th:text="${app.type.label}">类型</span>
-                        <span class="badge" th:if="${app.critical}" title="关键目标异常会影响平台自身的健康状态">关键</span>
+                        <span class="badge" th:if="${app.critical}">关键</span>
                         <span class="badge badge--muted" th:if="${!app.enabled}">已停用</span>
                         <span class="pill" th:classappend="'is-' + ${app.state.code}"
                               th:text="${app.state.label}">未知</span>
@@ -187,7 +180,7 @@
             </div>
         </section>
 
-        <p class="no-match" id="no-match" hidden>没有符合筛选条件的应用。</p>
+        <p class="no-match" id="no-match" hidden>暂无匹配数据</p>
     </div>
 
 </main>
@@ -199,11 +192,6 @@
     </div>
     <div id="detail-body" class="dialog__body"></div>
 </dialog>
-
-<footer class="pagefoot">
-    <span>BGSSAI 健康巡检 · Spring Boot 4.1 / Java 21</span>
-    <span>接口：<code>/api/apps</code> · <code>/api/summary</code> · <code>/api/dashboard</code> · <code>/api/report.md</code></span>
-</footer>
 
 <script th:src="@{/js/app.js}"></script>
 </body>

@@ -1,6 +1,6 @@
 # bgssai-healthcheck
 
-> **已迁入官网（2026-09-22）**：巡检引擎、探针、告警与全部单元测试已搬到 [bgssai-website](https://github.com/liuliuzo/bgssai-website) 的 `bgssai-website-user` 模块 `com.bgssai.website.status` 包；公开状态页 `https://www.bgssai.com/status/`，内部看板 `/status/internal`（按 IP 放行）。本仓不再单独部署、不再演进，仅作历史留档。
+> **已迁入客服与运维支持中心（2026-11-16）**：巡检引擎、探针（含 `124.70.197.39` LLM 服务器 AI 模型健康检查）、告警与状态页已从 `bgssai-website` 迁至 [bgssai-support](https://github.com/liuliuzo/bgssai-support)；公开状态主页 `https://support.bgssai.com/`（及 `/status`），内部详细巡检看板 `https://support.bgssai.com/status/internal`（支持管理员登录或白名单 IP 访问）。本仓不再单独部署、不再演进，仅作历史留档。
 
 ## 产品线规划（全线统一）
 

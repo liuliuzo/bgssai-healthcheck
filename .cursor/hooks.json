@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {
+        "command": "python3 .cursor/hooks/block-fast-mode.py",
+        "matcher": "UserPromptSubmit"
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": "python3 .cursor/hooks/block-fast-mode.py"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "python3 .cursor/hooks/block-fast-mode.py",
+        "matcher": "Task"
+      }
+    ]
+  }
+}

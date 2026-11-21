@@ -1,0 +1,14 @@
+---
+description: Do not enable Cursor Fast mode when agents write code
+alwaysApply: true
+---
+
+# No Cursor Fast mode
+
+When any agent uses Cursor to write or edit code in this BGSSAI repository, do not turn on Fast mode to save tokens.
+
+- Do not select, request, default to, or recommend Cursor Fast mode, `*-fast` model slugs, or `fast=true` / `fast=on` variants.
+- Do not spawn subagents on a Fast model. Custom agents in this repo must use `model: inherit` or an explicit `ModelName[fast=false]`.
+- If Fast is already on, switch it off and continue without it. Quality of the coding work comes first; saving tokens is not a reason to use Fast.
+
+This rule is mandatory. A hook in `.cursor/hooks/` also denies Fast model selections when Cursor provides the model in the hook payload. The hook cannot turn off a Fast choice in the UI by itself, so still follow this rule.
